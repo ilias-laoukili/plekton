@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ilias-laoukili/plekton/blob/main/schemas/hetero_graph.schema.json",
+  "title": "plekton heterogeneous graph JSON",
+  "description": "Canonical heterogeneous graph export produced by plekton-entity::hetero and consumed by plekton.hetero.to_hetero_data.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "nodes",
+    "edges",
+    "features"
+  ],
+  "properties": {
+    "schema": {
+      "const": "plekton.hetero-graph/v1"
+    },
+    "nodes": {
+      "description": "Node ids grouped by node type; indices in edge_index refer to positions within each type's array.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "edges": {
+      "description": "Edge blocks keyed by canonical (src_type, relation, dst_type) triples.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "src_type",
+          "relation",
+          "dst_type",
+          "edge_index"
+        ],
+        "properties": {
+          "src_type": { "type": "string" },
+          "relation": { "type": "string" },
+          "dst_type": { "type": "string" },
+          "edge_index": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "features": {
+      "description": "Explicit feature stance so consumers never silently fabricate node features.",
+      "type": "object",
+      "required": ["stance"],
+      "properties": {
+        "stance": {
+          "enum": ["none", "provided"]
+        },
+        "why": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

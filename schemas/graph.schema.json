@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ilias-laoukili/plekton/blob/main/schemas/graph.schema.json",
+  "title": "plekton graph JSON",
+  "description": "Canonical graph-JSON contract crossing the Rust<->Python boundary: metadata + nodes + edges.",
+  "type": "object",
+  "required": [
+    "metadata",
+    "nodes",
+    "edges"
+  ],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": [
+        "schema",
+        "n_nodes",
+        "n_edges",
+        "homophily"
+      ],
+      "properties": {
+        "schema": {
+          "const": "plekton.graph/v1"
+        },
+        "n_nodes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "n_edges": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "homophily": {
+          "type": "number"
+        },
+        "avg_degree_actual": {
+          "type": "number"
+        },
+        "n_components": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clustering_coeff": {
+          "description": "DEPRECATED alias of transitivity_global kept for backward compatibility. Prefer reading transitivity_global or clustering_mean_local explicitly.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "density": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "assortativity": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "feature_schema": {
+          "description": "Optional identifier naming the node feature column ordering.",
+          "type": "string"
+        },
+        "transitivity_global": {
+          "description": "Global transitivity, 3*triangles / open_triplets. null when above the triangle-counting threshold or when no open triplet exists (metrics_skipped explains why).",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "clustering_mean_local": {
+          "description": "Mean local clustering coefficient averaged over nodes. null when not computed or undefined (metrics_skipped explains why).",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "metrics_skipped": {
+          "description": "Explicit reasons for every null metric above.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "metric",
+              "reason"
+            ],
+            "properties": {
+              "metric": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "community"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "community": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "features": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source",
+          "target"
+        ],
+        "properties": {
+          "source": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "target": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}

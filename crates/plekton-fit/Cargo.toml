@@ -1,0 +1,21 @@
+[package]
+name        = "plekton-fit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Blockmodel estimation (partition, mixing matrix, degree correction) and overlapping community detection (SLPA) from plain edge lists."
+license.workspace = true
+keywords    = ["graph", "sbm", "community-detection", "slpa", "blockmodel"]
+categories  = ["algorithms", "science"]
+readme      = "README.md"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+rand = { version = "0.8", features = ["small_rng"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,48 @@
+# plekton-core — the synthetic graph generation engine.
+#
+# Directory is named `plekton-core/` for in-workspace navigation, while the
+# package is published as `plekton` so Rust users can write `cargo add plekton`.
+#
+# Pure-Rust library (rlib). No pyo3, no numpy, no libpython. Python bindings
+# live in the sibling crate `plekton-python`, built by maturin into the
+# `plekton` PyPI wheel.
+
+[package]
+name = "plekton"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "High-performance synthetic graph generation in Rust: SBM, O(E) DC-SBM, cSBM, Barabási–Albert, and multi-attribute mixing graphs."
+license.workspace = true
+repository.workspace = true
+keywords = ["graph", "network-science", "sbm", "synthetic-data", "gnn"]
+categories = ["algorithms", "science", "simulation"]
+readme = "README.md"
+
+[lib]
+name = "plekton"
+
+[[bin]]
+name = "sbm_bench"
+path = "src/bin/sbm_bench.rs"
+
+[dependencies]
+plekton-metrics = { path = "../plekton-metrics", version = "0.1.0" }
+num-traits       = "0.2"
+rand             = { version = "0.8", features = ["small_rng"] }
+rand_distr       = "0.4"
+serde            = { workspace = true }
+serde_json       = { workspace = true }
+thiserror        = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+# The round-trip test lives here rather than in `plekton-fit` so that crate
+# keeps its zero internal dependency count.
+plekton-fit    = { path = "../plekton-fit" }
+plekton-entity = { path = "../plekton-entity" }
+jsonschema      = { version = "0.48.2", default-features = false, features = ["resolve-file"] }
+sha2            = "0.10"

@@ -1,0 +1,26 @@
+[package]
+name        = "plekton-entity"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Domain-agnostic records → entity/relation heterogeneous graph builder with coverage diagnostics, temporal co-occurrence joins, tumbling windows, DOT and PyG HeteroData export."
+license.workspace = true
+keywords    = ["graph", "heterogeneous-graph", "entity-graph", "etl", "gnn"]
+categories  = ["algorithms", "data-structures"]
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+chrono           = { version = "0.4", default-features = false, features = ["alloc"] }
+csv              = "1"
+plekton-metrics = { path = "../plekton-metrics", version = "0.1.0" }
+hashbrown        = "0.15"
+serde            = { workspace = true }
+serde_json       = { workspace = true }
+thiserror        = { workspace = true }
+
+[lints]
+workspace = true

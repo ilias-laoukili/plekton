@@ -1,0 +1,60 @@
+#!/bin/sh
+# Pre-commit checks for plekton: the commit is refused as soon as one fails.
+# Activate once per copy of the repository:
+#     git config core.hooksPath .githooks
+set -u
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+refuse() {
+    echo "pre-commit: commit refused: $1" >&2
+    exit 1
+}
+
+# 1. What is checked must be what is committed: refuse unstaged modifications.
+if git status --porcelain | grep -q '^.[^ ]'; then
+    refuse "unstaged changes remain outside the commit (see git status); stage or stash them first."
+fi
+
+# 2. Notice when cross-platform determinism goldens are modified.
+if git diff --cached --name-only -- crates/plekton-core/tests/determinism_golden.rs | grep -q .; then
+    echo "pre-commit: notice: determinism_golden.rs is modified — ensure any golden re-freeze is intentional and documented." >&2
+fi
+
+# 3. Rust checks (plekton-python is a maturin cdylib, verified via cargo check).
+cargo fmt --all -- --check \
+    || refuse "Rust formatting check failed (run: cargo fmt --all)."
+cargo clippy --workspace --exclude plekton-python --all-targets -- -D warnings \
+    || refuse "cargo clippy failed."
+cargo test --workspace --exclude plekton-python -q \
+    || refuse "cargo test failed."
+cargo check -p plekton-python \
+    || refuse "cargo check -p plekton-python failed."
+
+# 4. Python checks (run whenever a local .venv or system ruff/mypy/pytest is available).
+VENV_BIN=""
+if [ -x .venv/bin/python ]; then
+    VENV_BIN="$(pwd)/.venv/bin"
+fi
+
+run_py_tool() {
+    tool="$1"
+    shift
+    if [ -n "$VENV_BIN" ] && [ -x "$VENV_BIN/$tool" ]; then
+        "$VENV_BIN/$tool" "$@"
+    elif command -v "$tool" >/dev/null 2>&1; then
+        "$tool" "$@"
+    else
+        echo "pre-commit: skipping $tool (not found in .venv or PATH)" >&2
+        return 0
+    fi
+}
+
+run_py_tool ruff check python benchmarks \
+    || refuse "ruff check failed."
+run_py_tool mypy \
+    || refuse "mypy failed."
+run_py_tool pytest -q \
+    || refuse "pytest failed."
+
+exit 0

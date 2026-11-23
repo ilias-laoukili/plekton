@@ -1,0 +1,49 @@
+[workspace]
+members = [
+    "crates/plekton-core",
+    "crates/plekton-metrics",
+    "crates/plekton-fit",
+    "crates/plekton-sparsify",
+    "crates/plekton-entity",
+    "crates/plekton-python",
+]
+# plekton-python is a cdylib + pyo3 extension built by maturin (which sets the
+# right link flags), not plain cargo; keeping it out of the defaults avoids
+# macOS linker hacks. `cargo check -p plekton-python` still checks it.
+default-members = [
+    "crates/plekton-core",
+    "crates/plekton-metrics",
+    "crates/plekton-fit",
+    "crates/plekton-sparsify",
+    "crates/plekton-entity",
+]
+resolver = "2"
+
+[workspace.package]
+version      = "0.1.0"
+authors      = ["Ilias Laoukili"]
+edition      = "2021"
+rust-version = "1.89"
+license      = "Apache-2.0"
+repository   = "https://github.com/ilias-laoukili/plekton"
+
+[workspace.dependencies]
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror  = "1"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 1

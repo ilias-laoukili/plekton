@@ -1,0 +1,23 @@
+[package]
+name        = "plekton-metrics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Domain-agnostic graph-metric primitives (homophily, attribute mixing, components, clustering, transitivity, assortativity, edge similarity) over plain edge lists."
+license.workspace = true
+keywords    = ["graph", "metrics", "homophily", "clustering", "network"]
+categories  = ["algorithms", "science"]
+readme      = "README.md"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+hashbrown = "0.15"
+rayon     = "1"
+serde     = { workspace = true }
+
+[lints]
+workspace = true

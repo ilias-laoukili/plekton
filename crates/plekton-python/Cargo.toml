@@ -1,0 +1,39 @@
+# plekton-python — PyO3 / maturin Python bindings for plekton.
+#
+# Built by maturin into the `plekton` PyPI wheel (`plekton._plekton`).
+# No code in this crate runs without a Python interpreter — see `plekton-core`
+# for the pure-Rust public API. Never published to crates.io.
+
+[package]
+name        = "plekton-python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Python bindings for plekton (built by maturin)"
+license.workspace = true
+repository.workspace = true
+authors.workspace    = true
+publish     = false
+
+[lib]
+# Compiled artifact name → ends up at python/plekton/_plekton.<abi>.so
+name       = "_plekton"
+crate-type = ["cdylib"]
+
+[dependencies]
+plekton          = { path = "../plekton-core",     version = "0.1.0" }
+plekton-fit      = { path = "../plekton-fit",      version = "0.1.0" }
+plekton-metrics  = { path = "../plekton-metrics",  version = "0.1.0" }
+plekton-sparsify = { path = "../plekton-sparsify", version = "0.1.0" }
+
+# Python/NumPy bridge — abi3-py311 produces a single stable-ABI wheel
+# usable on any Python ≥ 3.11. Keep in lock-step with `requires-python`.
+ndarray = "0.16"
+numpy   = "0.25"
+pyo3    = { version = "0.25", features = ["extension-module", "abi3-py311"] }
+
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
