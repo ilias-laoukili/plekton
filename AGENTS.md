@@ -28,6 +28,7 @@ python/
 schemas/             (JSON Schemas validated by `crates/plekton-core/tests/schema.rs`)
 docs/                (model reference `models.md` and JSON contract `json-schema.md`)
 benchmarks/          (reproducible throughput benchmark `bench.py`)
+assets/              (SVG logos light/dark for the README + social-preview source)
 ```
 
 ## Build, Test & Lint Commands
