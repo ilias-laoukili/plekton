@@ -29,13 +29,15 @@
 //!
 //! The Gaussian draws use a seeded [`ChaCha8Rng`] in edge order, so results are
 //! reproducible across platforms for a given seed. As with any sampling method,
-//! the scores are **not** bit-identical to the `NumPy` reference (different RNG),
-//! but they approximate the same `R_eff` within the JL error bound.
+//! another seed (or another implementation of the method) gives different
+//! scores, each approximating the same `R_eff` within the JL error bound.
 
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, StandardNormal};
 use rayon::prelude::*;
+
+use crate::SparsifyError;
 
 /// Regularisation added to the Laplacian diagonal so CG converges even when the
 /// graph is disconnected (the Laplacian is otherwise singular on each component).
@@ -47,8 +49,8 @@ const RESISTANCE_FLOOR: f64 = 1e-10;
 /// Configuration for [`approx_er_scores`].
 #[derive(Debug, Clone, Copy)]
 pub struct ApproxErConfig {
-    /// JL approximation error `ε`. Smaller is more accurate but uses more
-    /// projections (`k = 24·ln(n)/ε²`). Default `0.3`.
+    /// JL approximation error `ε`, a finite number `> 0`. Smaller is more
+    /// accurate but uses more projections (`k = 24·ln(n)/ε²`). Default `0.3`.
     pub epsilon: f64,
     /// RNG seed for the Gaussian projection.
     pub seed: u64,
@@ -56,8 +58,8 @@ pub struct ApproxErConfig {
     pub max_cg_iters: usize,
     /// CG convergence tolerance on the residual L2 norm. Default `1e-6`.
     pub cg_tol: f64,
-    /// Optional cap on the JL dimension `k`. `None` reproduces the reference
-    /// formula exactly; `Some(cap)` bounds `k ≤ cap` so the method stays
+    /// Optional cap on the JL dimension `k`. `None` uses the formula's `k`
+    /// unchanged; `Some(cap)` bounds `k ≤ cap` so the method stays
     /// tractable on large subgraphs (identical behaviour when the formula's `k`
     /// is already `≤ cap`, e.g. on small graphs and tests).
     pub max_dim: Option<usize>,
@@ -97,15 +99,27 @@ fn jl_dimension(n_nodes: usize, config: &ApproxErConfig) -> usize {
 /// a zero-filled vector of the right length.
 ///
 /// See the [module docs](self) for the algorithm and complexity.
-#[must_use]
+///
+/// # Errors
+/// - [`SparsifyError::InvalidEpsilon`] if `config.epsilon` is not a finite
+///   number `> 0` (checked before anything else, whatever `max_dim` is).
+/// - [`SparsifyError::ProjectionTooLarge`] if the `n_nodes × k` projection
+///   overflows or cannot be allocated — `k` grows as `1/ε²`, so a vanishing
+///   `epsilon` without a `max_dim` cap gets here instead of aborting.
 pub fn approx_er_scores(
     n_nodes: usize,
     edges: &[(usize, usize)],
     config: &ApproxErConfig,
-) -> Vec<f64> {
+) -> Result<Vec<f64>, SparsifyError> {
+    // `ε = 0` would drive `k` to `usize::MAX` and overflow the projection
+    // buffer; NaN and ±∞ would silently collapse `k` to 1. None is an error bound.
+    if config.epsilon <= 0.0 || !config.epsilon.is_finite() {
+        return Err(SparsifyError::InvalidEpsilon(config.epsilon));
+    }
+
     let n_edges = edges.len();
     if n_edges == 0 || n_nodes == 0 {
-        return vec![0.0; n_edges];
+        return Ok(vec![0.0; n_edges]);
     }
 
     // Adjacency (for Laplacian mat-vec) and degrees, ignoring self-loops.
@@ -121,7 +135,7 @@ pub fn approx_er_scores(
     }
 
     let k = jl_dimension(n_nodes, config);
-    let projection = build_projection(n_nodes, edges, k, config.seed);
+    let projection = build_projection(n_nodes, edges, k, config.seed)?;
 
     // Solve L_reg · z_j = y_j for each column j (independent → parallel).
     let z_columns: Vec<Vec<f64>> = (0..k)
@@ -141,7 +155,7 @@ pub fn approx_er_scores(
         .collect();
 
     // R_eff(u, v) ≈ ‖Z[u] − Z[v]‖² over the k projected dimensions.
-    edges
+    Ok(edges
         .par_iter()
         .map(|&(u, v)| {
             if u == v {
@@ -156,7 +170,7 @@ pub fn approx_er_scores(
                 .sum();
             squared.max(RESISTANCE_FLOOR)
         })
-        .collect()
+        .collect())
 }
 
 /// Build the row-major `n × k` projection `Y = B · R`, where `R` is a Gaussian
@@ -165,14 +179,28 @@ pub fn approx_er_scores(
 /// `R` is never materialised: each edge draws its own `k`-vector and adds it to
 /// the source row and subtracts it from the target row. Draws happen in edge
 /// order from a seeded RNG, so the projection is deterministic.
+///
+/// The `n_nodes × k` buffer is sized with checked arithmetic and reserved
+/// fallibly, so an overflowing or unallocatable size is a
+/// [`SparsifyError::ProjectionTooLarge`] rather than a panic or an abort.
 #[allow(
     clippy::cast_precision_loss,
     reason = "k is small; 1/√k scale is inherently floating-point"
 )]
-fn build_projection(n_nodes: usize, edges: &[(usize, usize)], k: usize, seed: u64) -> Vec<f64> {
+fn build_projection(
+    n_nodes: usize,
+    edges: &[(usize, usize)],
+    k: usize,
+    seed: u64,
+) -> Result<Vec<f64>, SparsifyError> {
+    let too_large = || SparsifyError::ProjectionTooLarge { n_nodes, k };
+    let len = n_nodes.checked_mul(k).ok_or_else(too_large)?;
+    let mut projection: Vec<f64> = Vec::new();
+    projection.try_reserve_exact(len).map_err(|_| too_large())?;
+    projection.resize(len, 0.0);
+
     let scale = 1.0 / (k as f64).sqrt();
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let mut projection = vec![0.0; n_nodes * k];
     for &(u, v) in edges {
         if u == v {
             continue;
@@ -185,7 +213,7 @@ fn build_projection(n_nodes: usize, edges: &[(usize, usize)], k: usize, seed: u6
             projection[v_base + offset] -= value;
         }
     }
-    projection
+    Ok(projection)
 }
 
 /// Solve `(L + reg·I) x = b` by conjugate gradient, where `L` is the graph
@@ -256,10 +284,58 @@ mod tests {
 
     #[test]
     fn empty_graph_returns_zeros() {
-        let scores = approx_er_scores(0, &[], &ApproxErConfig::default());
+        let scores = approx_er_scores(0, &[], &ApproxErConfig::default()).unwrap();
         assert_eq!(scores, [] as [f64; 0]);
-        let scores = approx_er_scores(3, &[], &ApproxErConfig::default());
+        let scores = approx_er_scores(3, &[], &ApproxErConfig::default()).unwrap();
         assert_eq!(scores, [] as [f64; 0]);
+    }
+
+    #[test]
+    fn invalid_epsilon_is_rejected() {
+        // ε = 0 used to overflow the projection and abort the process; NaN and
+        // ±∞ silently collapsed k to 1. All are refused, even with a max_dim cap
+        // and on an edgeless graph.
+        let edges = [(0, 1), (1, 2)];
+        for bad in [0.0, -0.3, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for (n_nodes, graph) in [(3, &edges[..]), (3, &[][..])] {
+                for max_dim in [None, Some(8)] {
+                    let config = ApproxErConfig {
+                        epsilon: bad,
+                        max_dim,
+                        ..ApproxErConfig::default()
+                    };
+                    let err = approx_er_scores(n_nodes, graph, &config).unwrap_err();
+                    assert!(
+                        matches!(err, SparsifyError::InvalidEpsilon(e) if e.to_bits() == bad.to_bits()),
+                        "epsilon {bad} gave {err:?}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vanishing_epsilon_errors_instead_of_overflowing() {
+        // 24·ln(3)/ε² saturates k at usize::MAX, so n × k overflows: a typed
+        // error, not a panic. (A merely small ε that still fits would request a
+        // real, huge allocation — never exercise that in a test.)
+        let config = ApproxErConfig {
+            epsilon: 1e-10,
+            ..ApproxErConfig::default()
+        };
+        assert_eq!(jl_dimension(3, &config), usize::MAX);
+        let err = approx_er_scores(3, &[(0, 1), (1, 2)], &config).unwrap_err();
+        assert_eq!(
+            err,
+            SparsifyError::ProjectionTooLarge {
+                n_nodes: 3,
+                k: usize::MAX
+            }
+        );
+        // A one-node graph does not overflow the multiplication, but k entries of
+        // f64 still exceed what a Vec can hold.
+        let err = approx_er_scores(1, &[(0, 0)], &config).unwrap_err();
+        assert!(matches!(err, SparsifyError::ProjectionTooLarge { .. }));
     }
 
     #[test]
@@ -280,7 +356,7 @@ mod tests {
             seed: 1,
             ..ApproxErConfig::default()
         };
-        let scores = approx_er_scores(6, &edges, &config);
+        let scores = approx_er_scores(6, &edges, &config).unwrap();
         let bridge = scores[3];
         let triangle_max = scores
             .iter()
@@ -301,8 +377,8 @@ mod tests {
             seed: 99,
             ..ApproxErConfig::default()
         };
-        let a = approx_er_scores(4, &edges, &config);
-        let b = approx_er_scores(4, &edges, &config);
+        let a = approx_er_scores(4, &edges, &config).unwrap();
+        let b = approx_er_scores(4, &edges, &config).unwrap();
         assert_eq!(a, b);
     }
 

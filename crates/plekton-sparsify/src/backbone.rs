@@ -10,9 +10,13 @@
 //! geodesic distances, and its size is determined by the graph structure, not a
 //! target ratio.
 //!
-//! This is the method the research paper calls the *metric backbone* (Serrano
-//! et al., PNAS 2009), and it is **not** the same as thresholding raw Jaccard /
-//! Adamic-Adar scores. Two steps are required:
+//! This is the *metric backbone* of T. Simas, R. B. Correia and L. M. Rocha,
+//! "The distance backbone of complex networks", *Journal of Complex Networks*
+//! 9(6), cnab021 (2021), <https://doi.org/10.1093/comnet/cnab021>, which builds
+//! on the distance closures of T. Simas and L. M. Rocha, "Distance closures on
+//! complex networks", *Network Science* 3(2), 227–268 (2015),
+//! <https://doi.org/10.1017/nws.2015.11>. It is **not** the same as
+//! thresholding raw Jaccard / Adamic-Adar scores. Two steps are required:
 //!
 //! 1. **Proximity → distance.** Similarity scores must be inverted into a proper
 //!    distance so the triangle inequality can prune edges
@@ -35,8 +39,7 @@ use crate::{SparsifyError, SparsifyResult};
 /// means closer), the distance is `d = 1 − s / s_max`. For a metric that is
 /// **already a distance** (e.g. effective resistance — higher means farther),
 /// the distance is `d = s / s_max`. When every score is `≤ 0`, all distances
-/// are `1.0`. This mirrors the reference `_scores_to_cost` transform, whose
-/// `1 − J` form is a proven proper metric for Jaccard.
+/// are `1.0`.
 #[must_use]
 pub fn proximity_to_distance(scores: &[f64], is_distance_metric: bool) -> Vec<f64> {
     let s_max = scores.iter().copied().fold(0.0_f64, f64::max);

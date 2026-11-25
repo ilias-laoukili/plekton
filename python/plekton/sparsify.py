@@ -68,7 +68,8 @@ def similarity_scores(
     ``metric`` is one of ``"jaccard"``, ``"adamic_adar"``, ``"degree_product"``,
     or ``"feature_cosine"``. ``feature_cosine`` requires ``features`` (a
     ``float32[n_nodes, F]`` matrix); the structural metrics ignore it.
-    ``ignore_self_loops`` defaults to ``True`` to match the research reference.
+    ``ignore_self_loops`` defaults to ``True`` so a self-loop never makes a node
+    its own neighbour.
     Returns ``float64[E]`` aligned with ``edges``.
     """
     feats = None
@@ -91,7 +92,8 @@ def approx_effective_resistance(
     ``epsilon`` controls the Johnson-Lindenstrauss approximation error;
     ``max_dim`` optionally caps the projection dimension so the method stays
     tractable on large subgraphs. Returns ``float64[E]`` (higher = more critical
-    edge). This is the research's recommended default sparsification signal.
+    edge). Raises ``ValueError`` if ``epsilon`` is not a finite number ``> 0``,
+    or if it is so small that the projection cannot be allocated.
     """
     return np.asarray(
         _ext.approx_effective_resistance(_edges(edges), n_nodes, epsilon, seed, max_dim),
@@ -144,7 +146,9 @@ def metric_backbone_mask(
 ) -> np.ndarray:
     """Metric-backbone selection; return a ``bool[E]`` keep-mask.
 
-    Keeps only shortest-path-preserving edges (Serrano et al., 2009). ``distances``
+    Keeps only shortest-path-preserving edges: the metric backbone of Simas, Correia
+    & Rocha, *J. Complex Netw.* 9(6), cnab021 (2021),
+    https://doi.org/10.1093/comnet/cnab021. ``distances``
     are per-edge weights; pass ``distances_are_similarity=True`` to feed raw
     similarity scores (they are inverted to distances internally). The retained
     fraction is determined by graph structure, not a ratio.

@@ -17,7 +17,9 @@ use crate::{
 /// Generates a Barabási–Albert preferential-attachment graph.
 ///
 /// `m`: edges added per new node (≥ 1).
-/// `m0`: initial clique size (≥ m, < `n_nodes`).
+/// `m0`: initial clique size (≥ m, < `n_nodes`). A one-node seed (`m0 = 1`,
+/// hence `m = 1`) has no edge to attach to, so node 1 joins node 0 and growth
+/// continues from node 2: with `m = 1` the result is a tree on all `n_nodes`.
 /// Community labels are assigned sequentially: `label[i] = i * n_communities / n_nodes`.
 ///
 /// # Errors
@@ -76,14 +78,29 @@ pub fn generate_ba_core(
         }
     }
 
+    // A one-node seed (m0 = 1, hence m = 1) is a clique without an edge, so it
+    // contributes no stub and node 0 could never be drawn: it would stay
+    // isolated. Node 1 has exactly one possible neighbour, so attach it to node 0
+    // without an RNG draw and grow preferentially from node 2. (`m0 < n_nodes`
+    // guarantees node 1 exists.) Every m0 ≥ 2 path is untouched.
+    let first_grown_node = if m0 == 1 {
+        edges.push((0, 1));
+        degree[0] = 1;
+        degree[1] = 1;
+        2
+    } else {
+        m0
+    };
+
     // Preferential-attachment "stubs" — each node appears `degree[node]` times.
     // Sampling a stub uniformly at random reproduces `P(node) ∝ deg(node)`.
-    let mut stubs: Vec<usize> = (0..m0)
+    // The pool is never empty from here on: the seed has at least one edge.
+    let mut stubs: Vec<usize> = (0..first_grown_node)
         .flat_map(|seed_node| std::iter::repeat_n(seed_node, degree[seed_node]))
         .collect();
 
     // Grow the graph one node at a time.
-    for new_node in m0..n_nodes {
+    for new_node in first_grown_node..n_nodes {
         let mut chosen_neighbours: Vec<usize> = Vec::with_capacity(m);
         let mut chosen_neighbour_set: HashSet<usize> = HashSet::with_capacity(m);
         // `m × 20` retries before giving up; matches `m=1` saturation budget
@@ -114,11 +131,6 @@ pub fn generate_ba_core(
             degree[existing_node] += 1;
             degree[new_node] += 1;
             stubs.push(existing_node);
-            stubs.push(new_node);
-        }
-        // Isolated seed case: still register `new_node` in the stub pool once
-        // so it can be sampled by later iterations.
-        if chosen_neighbours.is_empty() {
             stubs.push(new_node);
         }
     }

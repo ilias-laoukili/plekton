@@ -89,4 +89,5 @@ Machine-readable schemas live in [`schemas/graph.schema.json`](../schemas/graph.
 - Every edge satisfies `source < target` (canonical undirected pair, listed once).
 - `features` is present on nodes only when using `csbm`.
 - `transitivity_global` is `null` above 20 000 nodes or when no open triplet exists; `metrics_skipped` explains every `null` metric.
+- `homophily` is always present but may be `null` when it is undefined: `plekton.nx.networkx_to_json` writes `null` for a graph with no edges or no labelled node (every `community` is `0`), the same rule as `plekton.metrics.homophily`, and records the reason in `metrics_skipped`.
 - `assortativity` is `null` for edgeless or regular graphs where degree variance is zero.

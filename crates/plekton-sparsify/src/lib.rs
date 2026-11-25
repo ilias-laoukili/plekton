@@ -21,8 +21,8 @@
 //! Two further methods have their own modules because they compute their own
 //! edge scores rather than taking a [`Strategy`] over supplied scores:
 //!
-//! - [`approx_er`] — approximate effective resistance (the research's
-//!   recommended default), combined with sampling via [`sparsify_spectral`].
+//! - [`approx_er`] — approximate effective resistance, combined with sampling
+//!   via [`sparsify_spectral`].
 //! - [`backbone`] — the shortest-path-preserving metric backbone, via
 //!   [`sparsify_metric_backbone`].
 //!
@@ -96,6 +96,19 @@ pub enum SparsifyError {
     /// A feature dimension of zero was supplied.
     #[error("feat_dim must be non-zero")]
     ZeroFeatureDim,
+    /// The approximate-effective-resistance `epsilon` was not a finite number
+    /// `> 0`.
+    #[error("epsilon must be a finite number > 0, got {0}")]
+    InvalidEpsilon(f64),
+    /// The `n_nodes × k` Johnson-Lindenstrauss projection cannot be allocated.
+    /// `k` grows as `1/ε²`, so a vanishing `epsilon` overflows it.
+    #[error("the {n_nodes} x {k} JL projection cannot be allocated; raise epsilon or set max_dim")]
+    ProjectionTooLarge {
+        /// Number of nodes (rows of the projection).
+        n_nodes: usize,
+        /// JL dimension (columns of the projection).
+        k: usize,
+    },
 }
 
 /// Lossless `usize` count -> `f64` (graph edge counts never approach 2^32).
@@ -104,7 +117,7 @@ fn count_to_f64(n: usize) -> f64 {
     f64::from(u32::try_from(n).unwrap_or(u32::MAX))
 }
 
-/// Number of edges to keep for a retention ratio, floored (as the reference).
+/// Number of edges to keep for a retention ratio: `⌊n_edges · ratio⌋`.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -117,8 +130,9 @@ fn num_to_keep(n_edges: usize, retention_ratio: f64) -> usize {
 /// Compute per-edge scores with a [`plekton_metrics::similarity`] metric.
 ///
 /// `features` is `Some((flat_row_major, feat_dim))` for [`Metric::FeatureCosine`]
-/// and may be `None` for the structural metrics. `ignore_self_loops` should be
-/// `true` to match the research reference (see [`plekton_metrics::similarity`]).
+/// and may be `None` for the structural metrics. `ignore_self_loops` is normally
+/// `true`, so a self-loop never makes a node its own neighbour (see
+/// [`plekton_metrics::similarity`]).
 ///
 /// # Errors
 /// Returns [`SparsifyError::MissingFeatures`] / [`SparsifyError::ZeroFeatureDim`]
@@ -226,14 +240,15 @@ pub fn sparsify_with_metric(
 /// Spectral sparsification (Spielman-Srivastava): score edges by approximate
 /// effective resistance, then sample proportionally to that resistance.
 ///
-/// This is the research's recommended default: [`approx_er_scores`] feeds a
-/// [`Strategy::Sampled`] at the given `retention_ratio`, so critical
+/// [`approx_er_scores`] feeds a [`Strategy::Sampled`] at the given
+/// `retention_ratio`, so critical
 /// (high-resistance) edges are kept with high probability. The `config.seed`
 /// drives the effective-resistance projection; the same seed is reused for the
 /// sampling stream so the whole pipeline is reproducible.
 ///
 /// # Errors
-/// Propagates errors from [`sparsify`] (e.g. an out-of-range `retention_ratio`).
+/// Propagates errors from [`approx_er_scores`] (e.g. an invalid `epsilon`) and
+/// from [`sparsify`] (e.g. an out-of-range `retention_ratio`).
 pub fn sparsify_spectral(
     n_nodes: usize,
     edges: &[(usize, usize)],
@@ -241,7 +256,7 @@ pub fn sparsify_spectral(
     config: &ApproxErConfig,
     preserve_connectivity: bool,
 ) -> Result<SparsifyResult, SparsifyError> {
-    let scores = approx_er_scores(n_nodes, edges, config);
+    let scores = approx_er_scores(n_nodes, edges, config)?;
     let strategy = Strategy::Sampled {
         retention_ratio,
         seed: config.seed,

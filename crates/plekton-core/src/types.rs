@@ -31,7 +31,11 @@ pub struct Metadata {
     /// Effective homophily — the fraction of edges whose endpoints share a
     /// community label. Differs from the *requested* homophily because of
     /// rounding when block sizes are unequal.
-    pub homophily: f64,
+    ///
+    /// Always serialised; `None` (JSON `null`) when the fraction is undefined —
+    /// no edges, or no node labelled — with a `metrics_skipped` entry saying
+    /// which.
+    pub homophily: Option<f64>,
     /// Mean degree across all nodes (`2 · n_edges / n_nodes`).
     #[serde(default)]
     pub avg_degree_actual: f64,

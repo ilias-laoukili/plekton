@@ -101,7 +101,9 @@ fn approx_effective_resistance<'py>(
         max_dim,
         ..ApproxErConfig::default()
     };
-    let scores = py.allow_threads(|| approx_er_scores(n_nodes, &edge_pairs, &config));
+    let scores = py
+        .allow_threads(|| approx_er_scores(n_nodes, &edge_pairs, &config))
+        .map_err(|e| map_err(&e))?;
     Ok(Array1::from(scores).into_pyarray(py))
 }
 

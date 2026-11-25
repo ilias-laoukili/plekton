@@ -20,9 +20,8 @@
 //! `jaccard_scores`, `adamic_adar_scores` and `degree_product_scores` take an
 //! `ignore_self_loops` flag (**default policy: `true` at call sites**). When
 //! `true`, edges `(u, u)` do not contribute to any neighbourhood and receive a
-//! score of `0.0`. This reproduces the reference behaviour of the research code,
-//! which strips self-loops (`remove_self_loops`) before scoring — a self-loop
-//! would otherwise count a node as its own neighbour and inflate the scores.
+//! score of `0.0`. Stripping them matters because a self-loop would otherwise
+//! count a node as its own neighbour and inflate the scores.
 //!
 //! All neighbourhood-based functions expect a canonical edge list (`source <
 //! target`, each undirected edge once) and return a `Vec<f64>` aligned with the
@@ -35,8 +34,8 @@ use crate::count_to_f64;
 
 /// Build per-node neighbour sets from a canonical edge list.
 ///
-/// Duplicate edges collapse (set semantics), matching the binary-adjacency
-/// convention of the reference implementation. When `ignore_self_loops` is
+/// Duplicate edges collapse (set semantics), so neighbourhoods are those of the
+/// binary adjacency matrix. When `ignore_self_loops` is
 /// `true`, `(u, u)` edges are skipped so a node is never its own neighbour.
 fn build_neighbour_sets(
     n_nodes: usize,
@@ -113,9 +112,10 @@ pub fn jaccard_scores(
 /// Compute the Adamic-Adar index of every edge.
 ///
 /// `AA(u, v) = Σ_{w ∈ N(u) ∩ N(v)} 1 / max(ln(deg(w) + 1), 1e-10)`. Common
-/// neighbours of low degree contribute more, penalising hubs. The `+1` inside
-/// the logarithm and the `1e-10` floor guard degree-1 nodes and division by
-/// zero exactly as the reference implementation does.
+/// neighbours of low degree contribute more, penalising hubs. Note the `+1`
+/// inside the logarithm: the classic Adamic–Adar index weights each common
+/// neighbour by `1 / ln deg(w)`, so these scores are not interchangeable with
+/// implementations of the classic form.
 ///
 /// # Arguments
 /// See [`jaccard_scores`].
@@ -149,8 +149,8 @@ pub fn adamic_adar_scores(
                 .iter()
                 .filter(|&&w| large.contains(&w))
                 .map(|&w| {
-                    // `ln_1p(deg)` == `ln(deg + 1)`, matching the reference, but
-                    // computed without the intermediate `1.0 +` rounding.
+                    // `ln_1p(deg)` == `ln(deg + 1)`, computed without the
+                    // intermediate `1.0 +` rounding.
                     let log_degree = count_to_f64(degrees[w]).ln_1p().max(1e-10);
                     1.0 / log_degree
                 })

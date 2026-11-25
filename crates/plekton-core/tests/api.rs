@@ -495,6 +495,30 @@ fn ba_all_new_nodes_get_edges() -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
+
+#[test]
+fn ba_m1_grows_a_spanning_tree() -> Result<(), Box<dyn std::error::Error>> {
+    // m = m0 = 1: the one-node seed has no edge, so node 1 must attach to node 0
+    // or node 0 is never drawn and stays isolated. Each later node adds one edge,
+    // so the n − 1 edges must form a single tree covering every node.
+    for seed in 0..5 {
+        let result = generate_ba_core(50, 1, 1, 1, Some(seed))?;
+        assert_eq!(result.canonical_edges.len(), 49, "seed {seed}");
+        let mut degree = [0usize; 50];
+        for &(src, dst) in &result.canonical_edges {
+            degree[usize::try_from(src)?] += 1;
+            degree[usize::try_from(dst)?] += 1;
+        }
+        assert!(
+            degree.iter().all(|&d| d >= 1),
+            "seed {seed}: isolated node, degrees {degree:?}"
+        );
+        let graph = plekton::sbm_result_to_graph_output(&result);
+        assert_eq!(graph.metadata.n_components, 1, "seed {seed}");
+    }
+    Ok(())
+}
+
 #[test]
 fn validate_survives_invalid_json() {
     let warnings = validate_config_warn("not json at all");

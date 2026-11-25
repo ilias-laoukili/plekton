@@ -137,6 +137,13 @@ class TestGenerateBA:
         np.testing.assert_array_equal(ei1, ei2)
         np.testing.assert_array_equal(labels1, labels2)
 
+    def test_m1_leaves_no_node_isolated(self) -> None:
+        """With m = 1 every node, the seed node included, gets an edge: a tree on n nodes."""
+        edge_index, _labels, _h = gg.generate_ba(n_nodes=30, m=1, seed=0)
+        assert edge_index.shape == (2, 2 * 29)
+        degrees = np.bincount(edge_index[0], minlength=30)
+        assert degrees.min() >= 1, f"isolated node in {degrees.tolist()}"
+
 
 @requires_plekton
 class TestGenerateCSBM:
@@ -321,6 +328,70 @@ class TestNetworkxRoundTrip:
         # The inverse canonicalises, collapsing (t,s) duplicates back to one edge.
         recovered = to_networkx(networkx_to_json(directed))
         assert recovered.number_of_edges() == to_networkx(j).number_of_edges()
+
+
+def _metadata_of(graph: nx.Graph) -> dict[str, object]:
+    """Return the ``metadata`` block ``networkx_to_json`` writes for ``graph``."""
+    metadata: dict[str, object] = json.loads(networkx_to_json(graph))["metadata"]
+    return metadata
+
+
+@requires_networkx
+class TestNetworkxToJsonMetadata:
+    """``networkx_to_json`` writes measured metadata, or ``None`` with a reason — never a filler."""
+
+    def test_components_are_counted(self) -> None:
+        """Components are counted, an isolated node included."""
+        graph = nx.Graph([(0, 1), (2, 3)])
+        graph.add_node(4)
+        assert _metadata_of(graph)["n_components"] == 3
+
+    def test_a_connected_graph_has_one_component(self) -> None:
+        """A connected graph has one component."""
+        assert _metadata_of(nx.path_graph(3))["n_components"] == 1
+
+    def test_directed_graphs_count_weak_components(self) -> None:
+        """Directed graphs count weakly connected components."""
+        # 0 -> 1 <- 2 is one weak component (but three strong ones).
+        assert _metadata_of(nx.DiGraph([(0, 1), (2, 1)]))["n_components"] == 1
+
+    def test_labelled_homophily_is_measured(self) -> None:
+        """Labelled homophily is measured."""
+        graph = nx.path_graph(3)
+        nx.set_node_attributes(graph, {0: 0, 1: 0, 2: 1}, "community")
+        metadata = _metadata_of(graph)
+        assert metadata["homophily"] == pytest.approx(0.5)
+        assert "metrics_skipped" not in metadata
+
+    def test_unlabelled_homophily_is_null_with_a_reason(self) -> None:
+        """Unlabelled homophily is null, with a reason."""
+        # Every node defaults to community 0: there is no label for an edge to share.
+        metadata = _metadata_of(nx.path_graph(3))
+        assert metadata["homophily"] is None
+        assert metadata["metrics_skipped"] == [
+            {
+                "metric": "homophily",
+                "reason": "undefined here: no node is labelled (every community is 0)",
+            },
+        ]
+
+    def test_edgeless_homophily_is_null_with_a_reason(self) -> None:
+        """Edgeless homophily is null, with a reason."""
+        graph = nx.empty_graph(3)
+        nx.set_node_attributes(graph, {0: 0, 1: 1, 2: 1}, "community")
+        metadata = _metadata_of(graph)
+        assert metadata["homophily"] is None
+        assert metadata["metrics_skipped"] == [
+            {"metric": "homophily", "reason": "undefined here: the graph has no edges"},
+        ]
+
+    def test_a_null_homophily_is_readable_by_the_rust_reader(self) -> None:
+        """A null homophily is readable by the Rust reader."""
+        # json_to_pyg (and so to_pyg) parses the metadata; a null must not break it.
+        edge_index, labels, x = gg.json_to_pyg(networkx_to_json(nx.path_graph(3)))
+        assert edge_index.shape == (_EDGE_INDEX_ROWS, 4)
+        assert labels.shape == (3,)
+        assert x is None
 
 
 @requires_plekton

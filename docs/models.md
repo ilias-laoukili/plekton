@@ -32,18 +32,20 @@ Generates graphs that satisfy simultaneous homophily, heterophily, or full categ
 
 ## Companion Analysis Primitives
 
-`plekton` pairs these generators with structural evaluation and reduction primitives: degree assortativity and honest structural metrics (`plekton-metrics`) [5], Spielman–Srivastava approximate effective-resistance sparsification (`plekton-sparsify`) [6], and Speaker–Listener Label Propagation (SLPA) for overlapping community detection (`plekton-fit`) [7].
+`plekton` pairs these generators with structural evaluation and reduction primitives: degree assortativity and honest structural metrics (`plekton-metrics`) [5], Spielman–Srivastava approximate effective-resistance sparsification (`plekton-sparsify`) [6], the shortest-path-preserving metric backbone (`plekton-sparsify`) [7], and Speaker–Listener Label Propagation (SLPA) for overlapping community detection (`plekton-fit`) [8].
 
 ## Ecosystem Positioning
 
-| Capability | `plekton` | `NetworkX` | `python-igraph` | `graph-tool` |
-|---|:---:|:---:|:---:|:---:|
-| Sparse SBM in $O(E)$ | ✓ | ✗ ($O(N^2)$) | ✓ | ✓ |
-| Exact $O(N+E)$ DC-SBM | ✓ | ✗ | ✗ | ✓ |
-| cSBM (correlated features + PyG tensors) | ✓ | ✗ | ✗ | ✗ |
-| Multi-attribute IPF `mixing_graph` | ✓ | ✗ | ✗ | ✗ |
-| Spectral approx-ER & metric backbone | ✓ | ✗ | ✗ | ✗ |
-| Lightweight install (`numpy`-only wheel) | ✓ | ✓ | ✓ | ✗ (C++/Boost) |
+| Capability | `plekton` | `NetworkX` | `python-igraph` | `graph-tool` | `NetworKit` | `rustworkx` |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| Sparse SBM in $O(E)$ | ✓ | ✗ ($O(N^2)$) | ✓ | ✓ | partial (planted partition only) | ✗ ($O(N^2)$) |
+| Exact $O(N+E)$ DC-SBM | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| cSBM (correlated features + PyG tensors) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Multi-attribute IPF `mixing_graph` | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Approximate effective resistance | ✓ | ✗ (exact only) | ✗ | ✗ | ✓ (`SpanningEdgeCentrality`) | ✗ |
+| Metric backbone [7] | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+
+NetworKit's Python API generates block structure only through `ClusteredRandomGraphGenerator(n, k, pin, pout)`: one intra- and one inter-cluster probability with uniformly random membership (sampled in $O(N + E)$), not an arbitrary $K \times K$ block matrix. Its `SpanningEdgeCentrality(G, tol).runApproximation()` approximates spanning-edge centrality, which equals each edge's effective resistance on an unweighted graph. NetworKit also ships a broad family of other edge sparsifiers (`networkit.sparsification`) that `plekton` does not.
 
 See [benchmarks/README.md](../benchmarks/README.md) and [`benchmarks/bench.py`](../benchmarks/bench.py) for reproducible throughput and peak-memory benchmarks.
 
@@ -61,4 +63,6 @@ See [benchmarks/README.md](../benchmarks/README.md) and [`benchmarks/bench.py`](
 
 [6] D. A. Spielman and N. Srivastava. “Graph Sparsification by Effective Resistances.” *SIAM Journal on Computing*, 40(6), 1913–1926, 2011. [DOI](https://doi.org/10.1137/080734029).
 
-[7] J. Xie, B. K. Szymanski, and X. Liu. “SLPA: Uncovering Overlapping Communities in Social Networks via a Speaker-Listener Interaction Dynamic Process.” *Proceedings of the 11th IEEE International Conference on Data Mining Workshops (ICDMW)*, 344–349, 2011. [DOI](https://doi.org/10.1109/ICDMW.2011.154).
+[7] T. Simas, R. B. Correia, and L. M. Rocha. “The distance backbone of complex networks.” *Journal of Complex Networks*, 9(6), cnab021, 2021. [DOI](https://doi.org/10.1093/comnet/cnab021).
+
+[8] J. Xie, B. K. Szymanski, and X. Liu. “SLPA: Uncovering Overlapping Communities in Social Networks via a Speaker-Listener Interaction Dynamic Process.” *Proceedings of the 11th IEEE International Conference on Data Mining Workshops (ICDMW)*, 344–349, 2011. [DOI](https://doi.org/10.1109/ICDMW.2011.154).

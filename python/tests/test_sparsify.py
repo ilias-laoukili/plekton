@@ -96,6 +96,23 @@ def test_a_seeded_run_is_reproducible() -> None:
     np.testing.assert_array_equal(first, second)
 
 
+@pytest.mark.parametrize("epsilon", [0.0, -0.3, float("nan"), float("inf")])
+def test_an_invalid_epsilon_is_refused(epsilon: float) -> None:
+    """An invalid epsilon is refused."""
+    # epsilon = 0 used to overflow the projection and abort the whole interpreter;
+    # NaN and inf silently collapsed it to a single projection.
+    with pytest.raises(ValueError, match="epsilon"):
+        sparsify.approx_effective_resistance(EDGES, N_NODES, epsilon=epsilon)
+
+
+def test_a_vanishing_epsilon_is_refused_rather_than_overflowed() -> None:
+    """A vanishing epsilon is refused rather than overflowed."""
+    # k = 24 ln(n) / epsilon^2 saturates here, so the n x k projection cannot exist. A
+    # merely small epsilon would request a real, huge allocation: never test that one.
+    with pytest.raises(ValueError, match="projection"):
+        sparsify.approx_effective_resistance(EDGES, N_NODES, epsilon=1e-10)
+
+
 def test_metric_backbone_mask_is_boolean_and_edge_aligned() -> None:
     """Metric backbone mask is boolean and edge aligned."""
     scores = sparsify.similarity_scores(EDGES, n_nodes=N_NODES, metric="jaccard")

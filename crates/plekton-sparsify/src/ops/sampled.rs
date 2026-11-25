@@ -6,7 +6,7 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 /// Floor applied to edge weights so a zero-scoring edge still has a (tiny)
-/// non-zero chance of being kept — mirrors the reference implementation.
+/// non-zero chance of being kept.
 const WEIGHT_FLOOR: f64 = 1e-8;
 
 /// Sample exactly `num_keep` edges without replacement, with selection

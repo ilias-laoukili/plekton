@@ -31,7 +31,11 @@
           "minimum": 0
         },
         "homophily": {
-          "type": "number"
+          "description": "Edge homophily: fraction of edges whose endpoints share a community. Always present; null when undefined (no edges, or no node labelled), with metrics_skipped explaining why.",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "avg_degree_actual": {
           "type": "number"

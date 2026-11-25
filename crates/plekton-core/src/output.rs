@@ -102,7 +102,7 @@ fn assemble_graph_output(
             schema: crate::types::GRAPH_SCHEMA_ID.to_string(),
             n_nodes,
             n_edges: canonical_edges.len(),
-            homophily: effective_h,
+            homophily: Some(effective_h),
             avg_degree_actual,
             n_components,
             // Deprecated, and written with exactly the value it has always held
