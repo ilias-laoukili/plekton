@@ -9,6 +9,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# pwsh, the default shell on Windows, does not expand target/wheels/plekton-*.whl.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   rust:
     name: Rust (${{ matrix.os }})
@@ -16,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -38,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
@@ -61,5 +66,66 @@ jobs:
         run: |
           ruff check python benchmarks
           mypy
+      - name: Run pytest
+        run: pytest -v
+
+  pyg:
+    name: PyG extras (ubuntu-latest, Python 3.12)
+    runs-on: ubuntu-latest
+    env:
+      # python/tests/conftest.py turns every skip into a failure: no test may be
+      # skipped here, since every optional extra is installed.
+      PLEKTON_REQUIRE_EXTRAS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install torch (CPU), torch_geometric, networkx and the test tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install maturin numpy pytest mypy torch_geometric networkx
+      - name: Build and install Python wheel
+        run: |
+          maturin build --release --out target/wheels
+          pip install --no-deps --force-reinstall target/wheels/plekton-*.whl
+      - name: Show the extras under test
+        run: python -c "import networkx, torch, torch_geometric; print(torch.__version__, torch_geometric.__version__, networkx.__version__)"
+      # Elsewhere torch is absent and ignore_missing_imports makes it Any; here mypy
+      # checks pyg.py, hetero.py and distributions.py against torch's own types.
+      # torch_geometric ships no py.typed marker, so it stays Any even here.
+      - name: Typecheck against torch
+        run: mypy
+      - name: Run pytest (a skipped test fails here)
+        run: pytest -v -rs
+
+  numpy-min:
+    name: NumPy 1.24 (windows-latest, Python 3.11)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the oldest NumPy pyproject.toml accepts
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin "numpy==1.24.*" pytest networkx
+      - name: Build and install Python wheel
+        run: |
+          maturin build --release --out target/wheels
+          pip install --no-deps --force-reinstall target/wheels/plekton-*.whl
+      # Without the int32 check, this job could stop testing that case unnoticed.
+      - name: Check the NumPy under test and its default integer
+        run: |
+          python -c "import numpy as np; print(np.__version__, np.array([1]).dtype)"
+          python -c "import numpy as np; assert np.__version__.startswith('1.24.'), np.__version__"
+          python -c "import numpy as np; assert str(np.array([1]).dtype) == 'int32', np.array([1]).dtype"
+      # pytest only: NumPy 1.x ships different type stubs, so mypy is not run here.
       - name: Run pytest
         run: pytest -v

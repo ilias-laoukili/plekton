@@ -138,9 +138,12 @@ def sweep(
         _out_path.parent.mkdir(parents=True, exist_ok=True)
         _jsonl_mode = _out_path.suffix.lower() in {".jsonl", ".ndjson"}
 
+    # newline="\n" on every write: text mode would otherwise write \r\n on Windows.
     with contextlib.ExitStack() as _stack:
         if _jsonl_mode and _out_path is not None:
-            _jsonl_file = _stack.enter_context(_out_path.open("w", encoding="utf-8"))
+            _jsonl_file = _stack.enter_context(
+                _out_path.open("w", encoding="utf-8", newline="\n"),
+            )
         for combo in combos:
             for _ in range(count_per_config):
                 config = json.loads(json.dumps(base))
@@ -160,6 +163,6 @@ def sweep(
 
     # ── Write JSON array (non-streaming mode) ─────────────────────────────────
     if _out_path is not None and not _jsonl_mode:
-        _out_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
+        _out_path.write_text(json.dumps(results, indent=2), encoding="utf-8", newline="\n")
 
     return results

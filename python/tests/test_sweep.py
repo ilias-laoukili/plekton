@@ -127,6 +127,24 @@ def test_jsonl_output_written_per_entry(tmp_path: Path) -> None:
 
 
 @requires_plekton
+@pytest.mark.parametrize("name", ["results.jsonl", "results.json"])
+def test_output_file_has_no_carriage_return(tmp_path: Path, name: str) -> None:
+    r"""Lines end in ``\n`` on every platform: the written bytes hold no ``\r``."""
+    # Text mode writes os.linesep, so only a Windows run can catch a missing newline="\n".
+    output_file = tmp_path / name
+    sweep(
+        base=copy.deepcopy(_BASE_CONFIG),
+        sweep_params={"homophily": [0.3, 0.6]},
+        count_per_config=1,
+        base_seed=7,
+        output_path=str(output_file),
+    )
+    data = output_file.read_bytes()
+    assert b"\n" in data
+    assert b"\r" not in data
+
+
+@requires_plekton
 def test_without_base_seed_every_graph_records_the_seed_it_ran_with() -> None:
     """With ``base_seed=None`` a seed is drawn per graph, recorded, and replays the graph."""
     results = sweep(
