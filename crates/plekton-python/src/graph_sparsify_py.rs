@@ -43,14 +43,13 @@ fn read_features<'a>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (edges, n_nodes, metric, features=None, ignore_self_loops=true))]
+#[pyo3(signature = (edges, n_nodes, metric, features))]
 fn similarity_scores<'py>(
     py: Python<'py>,
     edges: PyReadonlyArray2<'py, i64>,
     n_nodes: usize,
     metric: &str,
     features: Option<PyReadonlyArray2<'py, f32>>,
-    ignore_self_loops: bool,
 ) -> PyResult<Bound<'py, PyArray1<f64>>> {
     let metric = match metric {
         "jaccard" => Metric::Jaccard,
@@ -76,7 +75,8 @@ fn similarity_scores<'py>(
                 n_nodes,
                 &edge_pairs,
                 features.as_ref().map(|(flat, dim)| (*flat, *dim)),
-                ignore_self_loops,
+                // A `plekton.Graph` holds no self-loop, so the policy cannot change a score.
+                true,
             )
         })
         .map_err(|e| map_err(&e))?;
@@ -85,7 +85,7 @@ fn similarity_scores<'py>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (edges, n_nodes, epsilon=0.3, seed=42, max_dim=None))]
+#[pyo3(signature = (edges, n_nodes, epsilon, seed, max_dim))]
 fn approx_effective_resistance<'py>(
     py: Python<'py>,
     edges: PyReadonlyArray2<'py, i64>,
@@ -110,7 +110,7 @@ fn approx_effective_resistance<'py>(
 #[pyfunction]
 #[pyo3(signature = (
     edges, n_nodes, scores, strategy, retention_ratio,
-    keep_lowest=false, min_per_node=1, seed=42, preserve_connectivity=true
+    keep_lowest, min_per_node, seed, preserve_connectivity
 ))]
 #[allow(
     clippy::too_many_arguments,
@@ -169,7 +169,7 @@ fn select_mask<'py>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (edges, n_nodes, distances, epsilon=1e-9, distances_are_similarity=false))]
+#[pyo3(signature = (edges, n_nodes, distances, epsilon, distances_are_similarity))]
 fn metric_backbone_mask<'py>(
     py: Python<'py>,
     edges: PyReadonlyArray2<'py, i64>,

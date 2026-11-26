@@ -8,6 +8,7 @@ use ndarray::{Array1, Array2};
 use numpy::IntoPyArray;
 use plekton::{
     generate_mixing_graph, generate_mixing_graph_json, MixingRequest, MixingTarget, StrengthSpec,
+    SynthGraphError,
 };
 use pyo3::{
     exceptions::PyValueError,
@@ -74,21 +75,22 @@ fn parse_strength(dict: &Bound<'_, PyDict>) -> PyResult<StrengthSpec> {
 
 /// Native `mixing_graph`: accepts Python dicts/lists directly and returns a dict
 /// with zero-copy `NumPy` `edges` (`int64[E, 2]`) and optional `strengths` (`float64[E]`).
+/// Every argument is explicit: `plekton.mixing_graph` supplies the defaults and the seed.
 #[pyfunction]
 #[pyo3(signature = (
     nodes,
-    attributes=None,
-    groups=None,
-    degrees=None,
-    mean_degree=None,
-    degree_spread=0.0,
-    max_degree=None,
-    mixing=None,
-    clustering=None,
-    strength=None,
-    directed=false,
-    popularity_spread=0.0,
-    seed=None
+    attributes,
+    groups,
+    degrees,
+    mean_degree,
+    degree_spread,
+    max_degree,
+    mixing,
+    clustering,
+    strength,
+    directed,
+    popularity_spread,
+    seed
 ))]
 #[allow(
     clippy::too_many_arguments,
@@ -108,11 +110,11 @@ fn mixing_graph_native<'py>(
     strength: Option<&Bound<'py, PyDict>>,
     directed: bool,
     popularity_spread: f64,
-    seed: Option<u64>,
+    seed: u64,
 ) -> PyResult<Bound<'py, PyDict>> {
     let request = MixingRequest {
         nodes,
-        seed,
+        seed: Some(seed),
         attributes: attributes.unwrap_or_default(),
         groups,
         degrees,
@@ -132,24 +134,33 @@ fn mixing_graph_native<'py>(
         },
     };
 
-    let result = py
-        .allow_threads(|| generate_mixing_graph(&request))
+    // Generation and conversion both run without the GIL. The edge pairs become
+    // `[i64; 2]` rows in their own allocation (same size and alignment), so no
+    // second edge buffer coexists with the first.
+    let (result, edges_arr, strengths_arr) = py
+        .allow_threads(|| {
+            let mut result = generate_mixing_graph(&request)?;
+            let edges = std::mem::take(&mut result.edges);
+            let n_edges = edges.len();
+            let mut flat = edges
+                .into_iter()
+                .map(|(u, v)| [to_i64(u), to_i64(v)])
+                .collect::<Vec<[i64; 2]>>()
+                .into_flattened();
+            flat.shrink_to_fit();
+            let edges_arr = Array2::from_shape_vec((n_edges, 2), flat).map_err(|e| {
+                SynthGraphError::GenerationFailed(format!("edges shape error: {e}"))
+            })?;
+            let strengths_arr = result.strengths.take().map(Array1::from);
+            Ok::<_, SynthGraphError>((result, edges_arr, strengths_arr))
+        })
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
-
-    let n_edges = result.edges.len();
-    let mut flat_edges = Vec::with_capacity(n_edges * 2);
-    for (u, v) in result.edges {
-        flat_edges.push(to_i64(u));
-        flat_edges.push(to_i64(v));
-    }
-    let edges_arr = Array2::from_shape_vec((n_edges, 2), flat_edges)
-        .map_err(|e| PyValueError::new_err(format!("edges shape error: {e}")))?;
 
     let out = PyDict::new(py);
     out.set_item("edges", edges_arr.into_pyarray(py))?;
     out.set_item("directed", result.directed)?;
-    if let Some(strengths) = result.strengths {
-        out.set_item("strengths", Array1::from(strengths).into_pyarray(py))?;
+    if let Some(strengths) = strengths_arr {
+        out.set_item("strengths", strengths.into_pyarray(py))?;
     }
     out.set_item("wanted_degree", result.wanted_degree)?;
     out.set_item("mean_degree", result.mean_degree)?;

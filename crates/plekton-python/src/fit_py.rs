@@ -24,7 +24,7 @@ fn to_i64(value: usize) -> i64 {
 }
 
 #[pyfunction]
-#[pyo3(signature = (edges, n_nodes, labels=None, attribute="labels", seed=0, max_rounds=30))]
+#[pyo3(signature = (edges, n_nodes, labels, attribute, seed, max_rounds))]
 fn fit_blockmodel<'py>(
     py: Python<'py>,
     edges: PyReadonlyArray2<'py, i64>,
@@ -102,7 +102,7 @@ fn fit_blockmodel<'py>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (edges, n_nodes, seed=0, max_rounds=30))]
+#[pyo3(signature = (edges, n_nodes, seed, max_rounds))]
 fn label_propagation<'py>(
     py: Python<'py>,
     edges: PyReadonlyArray2<'py, i64>,
@@ -131,16 +131,21 @@ fn label_propagation<'py>(
 }
 
 #[pyfunction]
-#[pyo3(signature = (n_nodes, edges, seed=0, rounds=100, threshold=0.2))]
-fn overlapping_communities(
-    py: Python<'_>,
+#[pyo3(signature = (edges, n_nodes, seed, rounds, threshold))]
+fn overlapping_communities<'py>(
+    py: Python<'py>,
+    edges: PyReadonlyArray2<'py, i64>,
     n_nodes: usize,
-    edges: Vec<(usize, usize)>,
     seed: u64,
     rounds: usize,
     threshold: f64,
-) -> Vec<Vec<usize>> {
-    py.allow_threads(|| detect_overlapping(&edges, n_nodes, seed, rounds, threshold).communities)
+) -> PyResult<Vec<Vec<usize>>> {
+    // Same bounds check as every other binding: an id outside the graph is an
+    // error here, not an edge the detector quietly skips.
+    let edge_pairs = read_edges(&edges, n_nodes)?;
+    Ok(py.allow_threads(|| {
+        detect_overlapping(&edge_pairs, n_nodes, seed, rounds, threshold).communities
+    }))
 }
 
 pub fn register<'py>(

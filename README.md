@@ -25,14 +25,17 @@ pip install git+https://github.com/ilias-laoukili/plekton
 ```
 
 ```python
-from plekton import generate_sbm, sparsify
+import plekton
+from plekton import sparsify
 
-edge_index, labels, h = generate_sbm(1_000, 4, p_in=0.05, p_out=0.002, seed=42)
-edges = edge_index[:, edge_index[0] < edge_index[1]].T  # (E, 2): each undirected edge once
-scores = sparsify.approx_effective_resistance(edges, 1_000, seed=42)
-keep = sparsify.select_mask(edges, 1_000, scores, "sampled", retention_ratio=0.5)
-print(f"{len(edges)} edges, homophily {h:.2f}, {keep.sum()} kept")
+graph = plekton.generate_sbm(1_000, 4, p_in=0.05, p_out=0.002, seed=42)
+scores = sparsify.approx_effective_resistance(graph, seed=42)
+keep = sparsify.select_mask(graph, scores, "sampled", retention_ratio=0.5, seed=42)
+sparse = graph.edge_subgraph(keep)
+print(f"{graph.n_edges} edges, homophily {graph.metadata['homophily']:.2f}, {sparse.n_edges} kept")
 ```
+
+Every generator returns a `plekton.Graph`: `n_nodes` nodes and a read-only `(E, 2)` int64 `edges` array that lists each undirected edge once, as `u < v`, plus optional `labels`, `x` and per-edge `edge_attrs`. `graph.edge_index` gives the PyG `(2, 2E)` layout. Every metric, fit and sparsify function takes the `Graph` first (or an `(E, 2)` array with `n_nodes=`), and refuses a `(2, E)` array, an edge listed in both directions, an id outside `[0, n_nodes)` or a non-integer dtype instead of silently miscounting.
 
 ## Benchmarks
 
@@ -108,9 +111,9 @@ marriage = plekton.mixing_graph(
     mixing={"sex": {"within": 0.0}, "age": {"within": 0.8}},
     seed=42,
 )
-marriage["edges"]          # int64 array of shape (300, 2)
-marriage["mixing"]["sex"]  # {'target': 0.0, 'within': 0.0, 'random': 0.5, 'r': -1.0}
-marriage["mixing"]["age"]  # within ≈ 0.77 for a target of 0.8 (random: 0.33)
+marriage.edges                      # read-only int64 array of shape (300, 2)
+marriage.metadata["mixing"]["sex"]  # {'target': 0.0, 'within': 0.0, 'random': 0.5, 'r': -1.0}
+marriage.metadata["mixing"]["age"]  # within ≈ 0.81 for a target of 0.8 (random: 0.33)
 ```
 
 ### Attributed, heavy-tailed graphs (cSBM with degree correction)
@@ -118,7 +121,7 @@ marriage["mixing"]["age"]  # within ≈ 0.77 for a target of 0.8 (random: 0.33)
 ```python
 import plekton
 
-edge_index, x, labels, effective_h = plekton.generate_csbm(
+graph = plekton.generate_csbm(
     n_nodes=10_000,
     n_communities=5,
     homophily=0.75,
@@ -128,7 +131,8 @@ edge_index, x, labels, effective_h = plekton.generate_csbm(
     theta_exponent=2.5,  # exact degree-corrected heavy tail
     seed=42,
 )
-# edge_index: int64 (2, 2E), both directions · x: float32 (10000, 64) · labels: int64 (10000,)
+# graph.edges: int64 (E, 2) · graph.x: float32 (10000, 64) · graph.labels: int64 (10000,)
+# graph.edge_index: int64 (2, 2E), every edge in both directions, for PyG
 ```
 
 ### Fit → regenerate → sparsify → measure
@@ -136,23 +140,22 @@ edge_index, x, labels, effective_h = plekton.generate_csbm(
 ```python
 import plekton
 
-edge_index, labels, _ = plekton.generate_sbm(500, 4, p_in=0.15, p_out=0.01, seed=0)
-edges = edge_index[:, edge_index[0] < edge_index[1]].T
+graph = plekton.generate_sbm(500, 4, p_in=0.15, p_out=0.01, seed=0)
 
-# Estimate the blockmodel, then regenerate from the fit.
-fitted = plekton.fit.fit_blockmodel(edges, n_nodes=500, labels=labels)
-edge_index2, labels2, _ = plekton.generate_sbm_from_fit(
-    500, fitted["block_sizes"], fitted["b_matrix"], fitted["theta"], seed=1
+# Estimate the blockmodel on the graph's own labels, then regenerate from the fit.
+fitted = plekton.fit.fit_blockmodel(graph)
+regenerated = plekton.generate_sbm_from_fit(
+    500, fitted["block_sizes"], fitted["b_matrix"], theta=fitted["theta"], seed=1
 )
 
 # Keep half of the edges, sampled by approximate effective resistance.
-resistance = plekton.sparsify.approx_effective_resistance(edges, n_nodes=500, seed=42)
-keep = plekton.sparsify.select_mask(edges, 500, resistance, "sampled", retention_ratio=0.5)
-sparse_edges = edges[keep]
+resistance = plekton.sparsify.approx_effective_resistance(graph, seed=42)
+keep = plekton.sparsify.select_mask(graph, resistance, "sampled", retention_ratio=0.5, seed=42)
+sparse = graph.edge_subgraph(keep)  # same nodes and labels, half the edges
 
 # Metrics return None, never a fabricated 0.0, when a quantity is undefined.
-print(plekton.metrics.homophily(sparse_edges, labels))
-print(plekton.metrics.degree_summary(500, sparse_edges))
+print(plekton.metrics.homophily(sparse))
+print(plekton.metrics.degree_summary(sparse))
 ```
 
 ### Overlapping communities and leakage-free splits
@@ -164,22 +167,24 @@ import plekton
 circle_a = [(a, b) for a in range(8) for b in range(a + 1, 8)]
 circle_b = [(a, b) for a in range(8, 16) for b in range(a + 1, 16)]
 bridge = [(v, 16) for v in (0, 1, 2, 3, 8, 9, 10, 11)]
-communities = plekton.overlapping_communities(17, circle_a + circle_b + bridge, seed=1)
+graph = plekton.Graph(circle_a + circle_b + bridge, n_nodes=17)
+communities = plekton.fit.overlapping_communities(graph, seed=1)
 
 # Group-disjoint split: no household straddles train, validation and test.
 households = [f"h{i // 4}" for i in range(400)]
 train, val, test = plekton.splits.grouped_split(households, fracs=(0.64, 0.16, 0.20), seed=0)
 ```
 
-`plekton.overlapping_communities` takes a list of `(u, v)` tuples; `plekton.fit.overlapping_communities` also accepts an `(E, 2)` array.
+Like every graph function, `plekton.fit.overlapping_communities` takes a `plekton.Graph`, or an `(E, 2)` edge array with `n_nodes=`.
 
 ## Guarantees and trade-offs
 
 - **Deterministic** — a fixed `seed` reproduces the same graph or detection: generators and detectors draw from `ChaCha8Rng` (`rand_chacha`). Golden tests pin the exact edges, labels and features of SBM, DC-SBM, BA and cSBM (`crates/plekton-core/tests/determinism_golden.rs`) and the output of label propagation and SLPA (`crates/plekton-fit/tests/determinism_golden.rs`); CI runs them on Linux and macOS. What they do not cover is listed in [docs/models.md](docs/models.md#determinism).
 - **Lean** — `import plekton` needs only NumPy; `torch`, `torch_geometric` and `networkx` come with the optional extras `pyg`, `networkx` and `all`.
-- **Zero-copy** — generators hand NumPy arrays over from Rust without copying; JSON serialisation is opt-in through `plekton.to_json(edge_index, labels, x=None, path=None)`.
+- **Zero-copy** — generators hand the canonical edges, labels and features over from Rust without copying, so a generated `Graph` holds 16 bytes per edge; the PyG `edge_index` (32 more) is built only when asked for. JSON serialisation is opt-in through `plekton.to_json(graph, path=None)`.
 - **No fabricated values** — undefined or skipped metrics are `None`, never `0.0`, and JSON metadata records the reason in `metrics_skipped` (global transitivity, for instance, is skipped above 20,000 nodes).
-- **Simple graphs** — SBM, DC-SBM, cSBM and BA produce simple undirected graphs (no self-loops, no parallel edges); directed graphs come from `mixing_graph(..., directed=True)` and `plekton-entity`.
+- **Simple graphs** — SBM, DC-SBM, cSBM and BA produce simple undirected graphs (no self-loops, no parallel edges); directed graphs come from `mixing_graph(..., directed=True)` and `plekton-entity`. `plekton.Graph` enforces it: a self-loop, a repeated edge or an undirected edge listed in both directions is refused.
+- **One seed convention** — every randomised function defaults to `seed=None`, which draws a seed; the generators record the seed that ran in `graph.metadata["seed"]`, so an unseeded graph can still be regenerated.
 
 ## Workspace
 

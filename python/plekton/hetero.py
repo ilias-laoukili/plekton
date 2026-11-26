@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from ._graph import Graph
 from ._graph_io import GraphInput, coerce_graph_json
 
 if TYPE_CHECKING:  # pragma: no cover - import-time only for type checkers
@@ -54,12 +55,22 @@ def to_hetero_data(graph: GraphInput, *, require_features: bool = False) -> Hete
 
     Raises
     ------
+    TypeError
+        If ``graph`` is a :class:`plekton.Graph`: that type is homogeneous, with no
+        node or relation types to map; ``to_pyg(graph).to_heterogeneous()`` is
+        PyG's own conversion.
     ValueError
         If the document is not ``plekton.hetero-graph/v1``.
     FeaturesNotProvidedError
         If ``require_features`` and the artifact carries none.
 
     """
+    if isinstance(graph, Graph):
+        msg = (
+            "to_hetero_data reads plekton.hetero-graph/v1 documents (typed entity graphs); "
+            "a plekton.Graph is homogeneous. Use plekton.pyg.to_pyg(graph).to_heterogeneous()"
+        )
+        raise TypeError(msg)
     import torch  # noqa: PLC0415 - torch is an optional extra, not a base-package dependency
     from torch_geometric.data import (  # noqa: PLC0415 - torch_geometric is an optional extra
         HeteroData,

@@ -3,8 +3,9 @@
 """Parameter sweep utility for ``plekton``.
 
 Generates graphs over a cross-product of parameter values by calling
-the compiled Rust engine in a loop.  Seed management is automatic when
-``base_seed`` is provided.
+the compiled Rust engine in a loop. Every graph gets an explicit seed, recorded
+in its entry's ``config["seed"]``: derived from ``base_seed`` when one is given,
+drawn otherwise, so any graph of a sweep can be regenerated.
 
 Streaming output
 ----------------
@@ -43,6 +44,15 @@ from pathlib import Path
 from typing import Any
 
 import plekton as _rs
+from plekton._seed import resolve_seed
+
+
+def _assign_seed(config: dict[str, Any], base_seed: int | None, index: int) -> None:
+    """Give ``config`` the explicit seed it will run with, so the entry records it."""
+    if base_seed is not None:
+        config["seed"] = base_seed + index
+    elif config.get("seed") is None:
+        config["seed"] = resolve_seed(None)
 
 
 def sweep(
@@ -68,7 +78,9 @@ def sweep(
         (useful for averaging over random seeds).
     base_seed:
         If provided, each graph receives a deterministic seed derived as
-        ``base_seed + result_index``, ensuring full reproducibility.
+        ``base_seed + result_index``, ensuring full reproducibility. If ``None``,
+        a graph whose config carries no ``"seed"`` gets a freshly drawn one. Either
+        way the seed that ran is in the entry's ``config["seed"]``.
     output_path:
         Optional path to write results to disk.
 
@@ -135,8 +147,7 @@ def sweep(
                 config.setdefault("parameters", {})
                 for k, v in zip(keys, combo, strict=True):
                     config["parameters"][k] = v
-                if base_seed is not None:
-                    config["seed"] = base_seed + len(results)
+                _assign_seed(config, base_seed, len(results))
 
                 graph_json = _rs.generate_from_config(json.dumps(config))
                 entry = {"config": config, "graph": json.loads(graph_json)}

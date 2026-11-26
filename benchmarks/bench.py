@@ -133,37 +133,37 @@ def _machine_info() -> dict[str, object]:
 
 
 def _worker_sbm(n_nodes: int, reps: int) -> BenchRow:
-    import plekton as gg  # noqa: PLC0415
+    import plekton  # noqa: PLC0415
 
     p_in, p_out = _sbm_probs(n_nodes)
-    ei, _, _ = gg.generate_sbm(n_nodes, _K, p_in, p_out, seed=_SEED)
-    ms = _time_median_ms(lambda: gg.generate_sbm(n_nodes, _K, p_in, p_out, seed=_SEED), reps)
-    return BenchRow("SBM (sparse)", "plekton", n_nodes, int(ei.shape[1] // 2), ms, _peak_mib())
+    graph = plekton.generate_sbm(n_nodes, _K, p_in, p_out, seed=_SEED)
+    ms = _time_median_ms(lambda: plekton.generate_sbm(n_nodes, _K, p_in, p_out, seed=_SEED), reps)
+    return BenchRow("SBM (sparse)", "plekton", n_nodes, graph.n_edges, ms, _peak_mib())
 
 
 def _worker_dcsbm(n_nodes: int, reps: int) -> BenchRow:
-    import plekton as gg  # noqa: PLC0415
+    import plekton  # noqa: PLC0415
 
     p_in, p_out = _sbm_probs(n_nodes)
-    ei, _, _ = gg.generate_sbm(n_nodes, _K, p_in, p_out, theta_exponent=2.5, seed=_SEED)
+    graph = plekton.generate_sbm(n_nodes, _K, p_in, p_out, theta_exponent=2.5, seed=_SEED)
     ms = _time_median_ms(
-        lambda: gg.generate_sbm(n_nodes, _K, p_in, p_out, theta_exponent=2.5, seed=_SEED),
+        lambda: plekton.generate_sbm(n_nodes, _K, p_in, p_out, theta_exponent=2.5, seed=_SEED),
         reps,
     )
     return BenchRow(
         "DC-SBM (gamma=2.5)",
         "plekton",
         n_nodes,
-        int(ei.shape[1] // 2),
+        graph.n_edges,
         ms,
         _peak_mib(),
     )
 
 
 def _worker_csbm(n_nodes: int, reps: int) -> BenchRow:
-    import plekton as gg  # noqa: PLC0415
+    import plekton  # noqa: PLC0415
 
-    ei, _, _, _ = gg.generate_csbm(
+    graph = plekton.generate_csbm(
         n_nodes,
         _K,
         _HOMOPHILY,
@@ -173,7 +173,7 @@ def _worker_csbm(n_nodes: int, reps: int) -> BenchRow:
         seed=_SEED,
     )
     ms = _time_median_ms(
-        lambda: gg.generate_csbm(
+        lambda: plekton.generate_csbm(
             n_nodes,
             _K,
             _HOMOPHILY,
@@ -184,18 +184,18 @@ def _worker_csbm(n_nodes: int, reps: int) -> BenchRow:
         ),
         reps,
     )
-    return BenchRow("cSBM (F=32)", "plekton", n_nodes, int(ei.shape[1] // 2), ms, _peak_mib())
+    return BenchRow("cSBM (F=32)", "plekton", n_nodes, graph.n_edges, ms, _peak_mib())
 
 
 def _worker_ba(n_nodes: int, reps: int) -> BenchRow:
-    import plekton as gg  # noqa: PLC0415
+    import plekton  # noqa: PLC0415
 
-    ei, _, _ = gg.generate_ba(n_nodes, m=5, m0=5, n_communities=_K, seed=_SEED)
+    graph = plekton.generate_ba(n_nodes, m=5, m0=5, n_communities=_K, seed=_SEED)
     ms = _time_median_ms(
-        lambda: gg.generate_ba(n_nodes, m=5, m0=5, n_communities=_K, seed=_SEED),
+        lambda: plekton.generate_ba(n_nodes, m=5, m0=5, n_communities=_K, seed=_SEED),
         reps,
     )
-    return BenchRow("BA (m=5)", "plekton", n_nodes, int(ei.shape[1] // 2), ms, _peak_mib())
+    return BenchRow("BA (m=5)", "plekton", n_nodes, graph.n_edges, ms, _peak_mib())
 
 
 def _worker_nx_sbm(n_nodes: int, reps: int) -> BenchRow:
@@ -218,7 +218,7 @@ def _worker_nx_sbm(n_nodes: int, reps: int) -> BenchRow:
 
 def _worker_mixing(n_nodes: int, reps: int) -> BenchRow:
     import numpy as np  # noqa: PLC0415
-    import plekton as gg  # noqa: PLC0415
+    import plekton  # noqa: PLC0415
 
     rng = np.random.default_rng(_SEED)
     sex = [f"s{v}" for v in rng.integers(0, 2, size=n_nodes).tolist()]
@@ -226,9 +226,15 @@ def _worker_mixing(n_nodes: int, reps: int) -> BenchRow:
     degrees = [6] * n_nodes
     attrs = {"sex": sex, "age": age}
     targets = {"sex": {"within": 0.2}, "age": {"within": 0.75}}
-    res = gg.mixing_graph(n_nodes, attributes=attrs, degrees=degrees, mixing=targets, seed=_SEED)
+    res = plekton.mixing_graph(
+        n_nodes,
+        attributes=attrs,
+        degrees=degrees,
+        mixing=targets,
+        seed=_SEED,
+    )
     ms = _time_median_ms(
-        lambda: gg.mixing_graph(
+        lambda: plekton.mixing_graph(
             n_nodes,
             attributes=attrs,
             degrees=degrees,
@@ -241,28 +247,26 @@ def _worker_mixing(n_nodes: int, reps: int) -> BenchRow:
         "mixing_graph (2 attrs, d=6)",
         "plekton",
         n_nodes,
-        int(res["edges"].shape[0]),
+        res.n_edges,
         ms,
         _peak_mib(),
     )
 
 
 def _worker_sparsify(n_nodes: int, reps: int) -> BenchRow:
-    import numpy as np  # noqa: PLC0415
-    import plekton as gg  # noqa: PLC0415
+    import plekton  # noqa: PLC0415
 
     p_in, p_out = _sbm_probs(n_nodes)
-    ei, _, _ = gg.generate_sbm(n_nodes, _K, p_in, p_out, seed=_SEED)
-    edges = np.ascontiguousarray(ei[:, ei[0] < ei[1]].T)
+    graph = plekton.generate_sbm(n_nodes, _K, p_in, p_out, seed=_SEED)
     ms = _time_median_ms(
-        lambda: gg.sparsify.approx_effective_resistance(edges, n_nodes, seed=_SEED),
+        lambda: plekton.sparsify.approx_effective_resistance(graph, seed=_SEED),
         reps,
     )
     return BenchRow(
         "sparsify approx_er (JL+CG)",
         "plekton",
         n_nodes,
-        int(edges.shape[0]),
+        graph.n_edges,
         ms,
         _peak_mib(),
     )

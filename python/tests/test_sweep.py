@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 try:
-    import plekton as _rs  # noqa: F401 — availability probe for the skip mark
+    import plekton as _rs
 
     _HAS_PLEKTON = True
 except ImportError:
@@ -124,3 +124,17 @@ def test_jsonl_output_written_per_entry(tmp_path: Path) -> None:
         parsed = json.loads(line)
         assert "config" in parsed, f"line {line_number} must have a 'config' key"
         assert "graph" in parsed, f"line {line_number} must have a 'graph' key"
+
+
+@requires_plekton
+def test_without_base_seed_every_graph_records_the_seed_it_ran_with() -> None:
+    """With ``base_seed=None`` a seed is drawn per graph, recorded, and replays the graph."""
+    results = sweep(
+        base=copy.deepcopy(_BASE_CONFIG),
+        sweep_params={"homophily": [0.5]},
+        count_per_config=2,
+    )
+    seeds = [entry["config"]["seed"] for entry in results]
+    assert all(isinstance(seed, int) for seed in seeds), seeds
+    replay = json.loads(_rs.generate_from_config(json.dumps(results[0]["config"])))
+    assert replay == results[0]["graph"]

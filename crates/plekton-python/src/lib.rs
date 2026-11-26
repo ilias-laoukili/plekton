@@ -7,9 +7,13 @@
 //!     allocation handed to `NumPy` via `IntoPyArray::into_pyarray(py)`, transferring
 //!     ownership without copying.
 //!   * Never use `to_pyarray_bound` here — it clones.
+//!   * Generators hand over their canonical edges as an `(E, 2)` array, built off
+//!     the GIL by reusing the core's own `canonical_edges` buffer in place. The
+//!     bidirectional `PyG` `edge_index` is derived in Python only when asked for.
 //!
-//! The compiled module is exposed as `plekton._plekton` and re-exported by
-//! `python/plekton/__init__.py`.
+//! The compiled module is exposed as `plekton._plekton` and wrapped by
+//! `python/plekton/`, where every generator returns a `plekton.Graph`. Seeds are
+//! always explicit here: the Python side draws one when the caller passes none.
 
 #![allow(
     clippy::needless_pass_by_value,
@@ -21,10 +25,11 @@ use std::fs;
 use ndarray::{Array1, Array2};
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
 use plekton::{
-    arrays_to_graph_output, build_bidirectional_edge_flat, collect_node_features, generate_ba_core,
+    arrays_to_graph_output, collect_node_features, generate_ba_core,
     generate_csbm as generate_csbm_core, generate_from_config_native, generate_sbm_core,
     generate_sbm_from_fit as generate_sbm_from_fit_core, BlockAssignment, BlockConnection,
-    CsbmConfig, DegreeCorrection, GraphOutput, SbmCoreResult, SbmFit, SynthGraphError,
+    CsbmConfig, CsbmCoreResult, DegreeCorrection, GraphOutput, SbmCoreResult, SbmFit,
+    SynthGraphError,
 };
 use pyo3::{exceptions::PyValueError, prelude::*};
 
@@ -42,10 +47,10 @@ fn to_i64(value: usize) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
-/// `(edge_index [2,2E], labels [N], effective_h)`.
+/// `(edges [E, 2], labels [N], effective_h)`.
 type SbmArrays<'py> = (Bound<'py, PyArray2<i64>>, Bound<'py, PyArray1<i64>>, f64);
 
-/// `(edge_index [2,2E], x [N,F], labels [N], effective_h)`.
+/// `(edges [E, 2], x [N, F], labels [N], effective_h)`.
 type CsbmArrays<'py> = (
     Bound<'py, PyArray2<i64>>,
     Bound<'py, PyArray2<f32>>,
@@ -53,36 +58,76 @@ type CsbmArrays<'py> = (
     f64,
 );
 
-/// `(edge_index [2,2E], labels [N], optional x [N,F])`.
-type PygArrays<'py> = (
+/// `(edges [E, 2], labels [N], optional x [N, F], metadata as JSON)`.
+type GraphArrays<'py> = (
     Bound<'py, PyArray2<i64>>,
     Bound<'py, PyArray1<i64>>,
     Option<Bound<'py, PyArray2<f32>>>,
+    String,
 );
 
-fn sbm_result_to_arrays<'py>(py: Python<'py>, result: &SbmCoreResult) -> PyResult<SbmArrays<'py>> {
-    let (flat, total_directed) = build_bidirectional_edge_flat(&result.canonical_edges);
-    let edge_arr = Array2::from_shape_vec((2, total_directed), flat)
-        .map_err(|error| PyValueError::new_err(format!("edge_index shape error: {error}")))?;
-    let label_arr = Array1::from(
-        result
-            .labels
-            .iter()
-            .map(|&lbl| to_i64(lbl))
-            .collect::<Vec<_>>(),
-    );
-    Ok((
-        edge_arr.into_pyarray(py),
-        label_arr.into_pyarray(py),
-        result.effective_h,
-    ))
+/// The owned arrays [`json_to_graph`] builds without the GIL.
+type ParsedGraph = (Array2<i64>, Array1<i64>, Option<Array2<f32>>, String);
+
+/// Canonical `(u, v)` pairs as a C-contiguous `(E, 2)` array.
+///
+/// Each `(i64, i64)` becomes an `[i64; 2]` in the same allocation (identical size
+/// and alignment, so the collection happens in place), then the spare capacity left
+/// by the sampler's growth is released. The array holds exactly 16 bytes per edge,
+/// and no second edge buffer ever coexists with the first.
+fn canonical_edges_array(edges: Vec<(i64, i64)>) -> Result<Array2<i64>, SynthGraphError> {
+    let n_edges = edges.len();
+    let mut flat = edges
+        .into_iter()
+        .map(<[i64; 2]>::from)
+        .collect::<Vec<[i64; 2]>>()
+        .into_flattened();
+    flat.shrink_to_fit();
+    Array2::from_shape_vec((n_edges, 2), flat)
+        .map_err(|error| SynthGraphError::GenerationFailed(format!("edges shape error: {error}")))
+}
+
+/// Community labels as `int64`, converted in place (`usize` and `i64` share a layout).
+fn labels_array(labels: Vec<usize>) -> Array1<i64> {
+    Array1::from(labels.into_iter().map(to_i64).collect::<Vec<i64>>())
+}
+
+/// Output of an SBM-family generator, converted without the GIL.
+struct SbmOwned {
+    edges: Array2<i64>,
+    labels: Array1<i64>,
+    effective_h: f64,
+}
+
+impl SbmOwned {
+    fn from_result(result: SbmCoreResult) -> Result<Self, SynthGraphError> {
+        let SbmCoreResult {
+            canonical_edges,
+            labels,
+            effective_h,
+            ..
+        } = result;
+        Ok(Self {
+            edges: canonical_edges_array(canonical_edges)?,
+            labels: labels_array(labels),
+            effective_h,
+        })
+    }
+
+    fn into_py(self, py: Python<'_>) -> SbmArrays<'_> {
+        (
+            self.edges.into_pyarray(py),
+            self.labels.into_pyarray(py),
+            self.effective_h,
+        )
+    }
 }
 
 // ─── Synthetic graph generators ──────────────────────────────────────────────
 
-/// SBM / DC-SBM: returns `(edge_index [2,2E], labels [N], effective_h)`.
+/// SBM / DC-SBM: returns `(edges [E, 2], labels [N], effective_h)`.
 #[pyfunction]
-#[pyo3(signature = (n_nodes, n_communities, p_in, p_out, theta_exponent=None, seed=None))]
+#[pyo3(signature = (n_nodes, n_communities, p_in, p_out, theta_exponent, seed))]
 fn generate_sbm(
     py: Python<'_>,
     n_nodes: usize,
@@ -90,26 +135,34 @@ fn generate_sbm(
     p_in: f64,
     p_out: f64,
     theta_exponent: Option<f64>,
-    seed: Option<u64>,
+    seed: u64,
 ) -> PyResult<SbmArrays<'_>> {
-    let result = py
+    let owned = py
         .allow_threads(|| {
-            generate_sbm_core(n_nodes, n_communities, p_in, p_out, theta_exponent, seed)
+            generate_sbm_core(
+                n_nodes,
+                n_communities,
+                p_in,
+                p_out,
+                theta_exponent,
+                Some(seed),
+            )
+            .and_then(SbmOwned::from_result)
         })
         .map_err(|e| err(&e))?;
-    sbm_result_to_arrays(py, &result)
+    Ok(owned.into_py(py))
 }
 
-/// Fitted SBM / DC-SBM: returns `(edge_index [2,2E], labels [N], effective_h)`.
+/// Fitted SBM / DC-SBM: returns `(edges [E, 2], labels [N], effective_h)`.
 #[pyfunction]
-#[pyo3(signature = (n_nodes, block_sizes, b_matrix, theta=None, seed=None))]
+#[pyo3(signature = (n_nodes, block_sizes, b_matrix, theta, seed))]
 fn generate_sbm_from_fit<'py>(
     py: Python<'py>,
     n_nodes: usize,
     block_sizes: Vec<usize>,
     b_matrix: PyReadonlyArray2<'py, f64>,
     theta: Option<PyReadonlyArray1<'py, f64>>,
-    seed: Option<u64>,
+    seed: u64,
 ) -> PyResult<SbmArrays<'py>> {
     let b_slice = b_matrix
         .as_slice()
@@ -124,7 +177,7 @@ fn generate_sbm_from_fit<'py>(
     };
     let b_vec = b_slice.to_vec();
 
-    let result = py
+    let owned = py
         .allow_threads(move || {
             let dc = theta_vec
                 .as_deref()
@@ -134,38 +187,41 @@ fn generate_sbm_from_fit<'py>(
                 connection: BlockConnection::Matrix(&b_vec),
                 degree_correction: dc,
             };
-            generate_sbm_from_fit_core(n_nodes, &fit, seed)
+            generate_sbm_from_fit_core(n_nodes, &fit, Some(seed)).and_then(SbmOwned::from_result)
         })
         .map_err(|e| err(&e))?;
-    sbm_result_to_arrays(py, &result)
+    Ok(owned.into_py(py))
 }
 
-/// Barabási–Albert: returns `(edge_index [2,2E], labels [N], effective_h)`.
+/// Barabási–Albert: returns `(edges [E, 2], labels [N], effective_h)`.
 #[pyfunction]
-#[pyo3(signature = (n_nodes, m=2, m0=None, n_communities=1, seed=None))]
+#[pyo3(signature = (n_nodes, m, m0, n_communities, seed))]
 fn generate_ba(
     py: Python<'_>,
     n_nodes: usize,
     m: usize,
     m0: Option<usize>,
     n_communities: usize,
-    seed: Option<u64>,
+    seed: u64,
 ) -> PyResult<SbmArrays<'_>> {
     let initial = m0.unwrap_or(m);
-    let result = py
-        .allow_threads(|| generate_ba_core(n_nodes, m, initial, n_communities, seed))
+    let owned = py
+        .allow_threads(|| {
+            generate_ba_core(n_nodes, m, initial, n_communities, Some(seed))
+                .and_then(SbmOwned::from_result)
+        })
         .map_err(|e| err(&e))?;
-    sbm_result_to_arrays(py, &result)
+    Ok(owned.into_py(py))
 }
 
-/// cSBM: returns `(edge_index [2,2E], x [N,F], labels [N], effective_h)`.
+/// cSBM: returns `(edges [E, 2], x [N, F], labels [N], effective_h)`.
 #[pyfunction]
 #[pyo3(signature = (
     n_nodes, n_communities, homophily, avg_degree, feat_dim, mu,
-    feature_dist="gaussian", class_weights=None, theta_exponent=None,
-    p_triangle=0.0, feat_noise_ratio=0.0, ensure_connected=false,
-    p_in_override=None, p_out_override=None, b_matrix=None,
-    centroids=None, covariance=None, seed=None
+    feature_dist, class_weights, theta_exponent,
+    p_triangle, feat_noise_ratio, ensure_connected,
+    p_in_override, p_out_override, b_matrix,
+    centroids, covariance, seed
 ))]
 #[allow(
     clippy::too_many_arguments,
@@ -190,10 +246,10 @@ fn generate_csbm<'py>(
     b_matrix: Option<Vec<f64>>,
     centroids: Option<Vec<f64>>,
     covariance: Option<Vec<f64>>,
-    seed: Option<u64>,
+    seed: u64,
 ) -> PyResult<CsbmArrays<'py>> {
     let fd = feature_dist.to_owned();
-    let result = py
+    let (edges, x, labels, effective_h) = py
         .allow_threads(move || {
             let cfg = CsbmConfig {
                 n_nodes,
@@ -213,30 +269,28 @@ fn generate_csbm<'py>(
                 b_matrix: b_matrix.as_deref(),
                 centroids_override: centroids.as_deref(),
                 covariance: covariance.as_deref(),
-                seed,
+                seed: Some(seed),
             };
-            generate_csbm_core(&cfg)
+            let CsbmCoreResult {
+                canonical_edges,
+                labels,
+                x_flat,
+                effective_h,
+                n_nodes,
+                feat_dim,
+            } = generate_csbm_core(&cfg)?;
+            let edges = canonical_edges_array(canonical_edges)?;
+            let x = Array2::from_shape_vec((n_nodes, feat_dim), x_flat)
+                .map_err(|error| SynthGraphError::Feature(format!("x shape error: {error}")))?;
+            Ok::<_, SynthGraphError>((edges, x, labels_array(labels), effective_h))
         })
         .map_err(|e| err(&e))?;
 
-    let (flat, total_directed) = build_bidirectional_edge_flat(&result.canonical_edges);
-    let edge_arr = Array2::from_shape_vec((2, total_directed), flat)
-        .map_err(|error| PyValueError::new_err(format!("edge_index shape error: {error}")))?;
-    let x_arr = Array2::from_shape_vec((result.n_nodes, result.feat_dim), result.x_flat)
-        .map_err(|error| PyValueError::new_err(format!("x shape error: {error}")))?;
-    let label_arr = Array1::from(
-        result
-            .labels
-            .iter()
-            .map(|&lbl| to_i64(lbl))
-            .collect::<Vec<_>>(),
-    );
-
     Ok((
-        edge_arr.into_pyarray(py),
-        x_arr.into_pyarray(py),
-        label_arr.into_pyarray(py),
-        result.effective_h,
+        edges.into_pyarray(py),
+        x.into_pyarray(py),
+        labels.into_pyarray(py),
+        effective_h,
     ))
 }
 
@@ -325,41 +379,66 @@ fn graph_to_json<'py>(
     .map_err(|e| err(&e))
 }
 
-// ─── PyG tensor converter ────────────────────────────────────────────────────
+// ─── JSON input ──────────────────────────────────────────────────────────────
 
+/// Parses canonical `plekton.graph/v1` JSON into `(edges [E, 2], labels [N],
+/// optional x [N, F], metadata as JSON)`. The edges come back exactly as the
+/// document lists them; `plekton.Graph.from_json` validates them.
 #[pyfunction]
 #[pyo3(signature = (json_str))]
-fn json_to_pyg<'py>(py: Python<'py>, json_str: &str) -> PyResult<PygArrays<'py>> {
-    let graph: GraphOutput = serde_json::from_str(json_str)
-        .map_err(|error| PyValueError::new_err(format!("JSON parse error: {error}")))?;
+fn json_to_graph<'py>(py: Python<'py>, json_str: &str) -> PyResult<GraphArrays<'py>> {
+    let (edges, labels, x, metadata) = py
+        .allow_threads(|| parse_graph_json(json_str))
+        .map_err(PyValueError::new_err)?;
+    Ok((
+        edges.into_pyarray(py),
+        labels.into_pyarray(py),
+        x.map(|arr| arr.into_pyarray(py)),
+        metadata,
+    ))
+}
 
-    let n_nodes = graph.nodes.len();
-    let labels: Vec<i64> = graph
+fn parse_graph_json(json_str: &str) -> Result<ParsedGraph, String> {
+    let graph: GraphOutput =
+        serde_json::from_str(json_str).map_err(|error| format!("JSON parse error: {error}"))?;
+    // Labels and features are indexed by position, so a node listed out of order
+    // would silently take another node's row.
+    if let Some((position, node)) = graph
         .nodes
         .iter()
-        .map(|node| to_i64(node.community))
-        .collect();
-    let label_arr = Array1::from(labels);
+        .enumerate()
+        .find(|(position, node)| node.id != *position)
+    {
+        return Err(format!(
+            "node at position {position} has id {}: plekton.graph/v1 lists nodes as ids \
+             0..n_nodes, in order",
+            node.id
+        ));
+    }
+    let x = collect_node_features(&graph.nodes)
+        .map_err(|error| error.to_string())?
+        .map(|(feat_dim, flat)| Array2::from_shape_vec((graph.nodes.len(), feat_dim), flat))
+        .transpose()
+        .map_err(|error| format!("x shape error: {error}"))?;
+    let metadata =
+        serde_json::to_string(&graph.metadata).map_err(|error| format!("metadata: {error}"))?;
 
-    let canonical: Vec<(i64, i64)> = graph
-        .edges
-        .iter()
-        .map(|edge| (to_i64(edge.source), to_i64(edge.target)))
-        .collect();
-    let (flat, total_directed) = build_bidirectional_edge_flat(&canonical);
-    let edge_arr = Array2::from_shape_vec((2, total_directed), flat)
-        .map_err(|error| PyValueError::new_err(format!("edge_index shape error: {error}")))?;
-
-    let x_arr = match collect_node_features(&graph.nodes).map_err(|e| err(&e))? {
-        Some((feat_dim, x_flat)) => {
-            let arr = Array2::from_shape_vec((n_nodes, feat_dim), x_flat)
-                .map_err(|error| PyValueError::new_err(format!("x shape error: {error}")))?;
-            Some(arr.into_pyarray(py))
-        }
-        None => None,
-    };
-
-    Ok((edge_arr.into_pyarray(py), label_arr.into_pyarray(py), x_arr))
+    let GraphOutput { nodes, edges, .. } = graph;
+    let labels = Array1::from(
+        nodes
+            .into_iter()
+            .map(|node| to_i64(node.community))
+            .collect::<Vec<i64>>(),
+    );
+    let n_edges = edges.len();
+    let flat = edges
+        .into_iter()
+        .map(|edge| [to_i64(edge.source), to_i64(edge.target)])
+        .collect::<Vec<[i64; 2]>>()
+        .into_flattened();
+    let edges = Array2::from_shape_vec((n_edges, 2), flat)
+        .map_err(|error| format!("edges shape error: {error}"))?;
+    Ok((edges, labels, x, metadata))
 }
 
 // ─── Config-driven dispatch ──────────────────────────────────────────────────
@@ -371,23 +450,6 @@ fn generate_from_config(py: Python<'_>, config_json: &str) -> PyResult<String> {
         .map_err(|e| err(&e))
 }
 
-// ─── Top-level SLPA convenience re-export ────────────────────────────────────
-
-#[pyfunction]
-#[pyo3(signature = (n_nodes, edges, seed=0, rounds=100, threshold=0.2))]
-fn overlapping_communities(
-    py: Python<'_>,
-    n_nodes: usize,
-    edges: Vec<(usize, usize)>,
-    seed: u64,
-    rounds: usize,
-    threshold: f64,
-) -> Vec<Vec<usize>> {
-    py.allow_threads(|| {
-        plekton_fit::detect_overlapping(&edges, n_nodes, seed, rounds, threshold).communities
-    })
-}
-
 // ─── Module registration ─────────────────────────────────────────────────────
 
 #[pymodule]
@@ -397,9 +459,8 @@ fn _plekton(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_ba, m)?)?;
     m.add_function(wrap_pyfunction!(generate_csbm, m)?)?;
     m.add_function(wrap_pyfunction!(graph_to_json, m)?)?;
-    m.add_function(wrap_pyfunction!(json_to_pyg, m)?)?;
+    m.add_function(wrap_pyfunction!(json_to_graph, m)?)?;
     m.add_function(wrap_pyfunction!(generate_from_config, m)?)?;
-    m.add_function(wrap_pyfunction!(overlapping_communities, m)?)?;
 
     mixing_py::register(m)?;
     graph_sparsify_py::register(py, m)?;

@@ -2,9 +2,9 @@
 # Copyright 2026 Ilias Laoukili
 """NetworkX converters for ``plekton``.
 
-:func:`to_networkx` turns any canonical ``plekton.graph/v1`` JSON document
-into a NetworkX graph (without requiring PyTorch), and :func:`networkx_to_json`
-is the inverse.
+:func:`to_networkx` turns a :class:`plekton.Graph`, or any canonical
+``plekton.graph/v1`` JSON document, into a NetworkX graph (without requiring
+PyTorch), and :func:`networkx_to_json` is the inverse.
 
 Requires::
 
@@ -12,10 +12,9 @@ Requires::
 
 Quick start
 -----------
->>> from plekton import generate_sbm, to_json
+>>> import plekton
 >>> from plekton.nx import to_networkx, networkx_to_json
->>> edge_index, labels, _ = generate_sbm(500, 5, 0.3, 0.02, seed=0)
->>> graph = to_networkx(to_json(edge_index, labels))
+>>> graph = to_networkx(plekton.generate_sbm(500, 5, 0.3, 0.02, seed=0))
 >>> graph_json = networkx_to_json(graph)
 """
 
@@ -26,12 +25,29 @@ from typing import Any
 
 import networkx as nx
 
+import plekton as _rs
+from plekton._graph import Graph
 from plekton._graph_io import GraphInput, coerce_graph_json
 
 
-def to_networkx(graph: GraphInput, *, directed: bool = False) -> nx.Graph:
-    """Convert a ``plekton`` JSON graph into a NetworkX ``Graph`` or ``DiGraph``."""
-    doc = json.loads(coerce_graph_json(graph))
+def to_networkx(
+    graph: Graph | GraphInput,
+    *,
+    directed: bool = False,
+    drop_edge_attrs: bool = False,
+) -> nx.Graph:
+    """Convert a ``plekton.Graph`` or a ``plekton`` JSON graph into a NetworkX graph.
+
+    A ``Graph`` goes through :func:`plekton.to_json` (so it must be undirected,
+    and ``drop_edge_attrs=True`` is needed to leave its edge attributes behind).
+    ``directed=True`` returns a ``DiGraph`` with every edge in both directions.
+    """
+    text = (
+        _rs.to_json(graph, drop_edge_attrs=drop_edge_attrs)
+        if isinstance(graph, Graph)
+        else coerce_graph_json(graph)
+    )
+    doc = json.loads(text)
 
     out: nx.Graph = nx.DiGraph() if directed else nx.Graph()
 

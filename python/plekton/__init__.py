@@ -3,16 +3,22 @@
 """Python face of ``plekton`` — compiled Rust engine with zero-copy NumPy arrays.
 
 The base package is deliberately lean: ``import plekton`` pulls only ``numpy``
-(never ``torch`` or ``torch_geometric``). It exposes:
+(never ``torch`` or ``torch_geometric``). Everything revolves around one type,
+:class:`plekton.Graph`: ``n_nodes`` nodes and an ``(E, 2)`` int64 edge array,
+plus optional labels, features, per-edge attributes and metadata. It exposes:
 
-- Synthetic graph generators: ``generate_sbm``, ``generate_sbm_from_fit``,
-  ``generate_csbm``, ``generate_ba``, ``mixing_graph``, ``generate_from_config``.
-- Canonical JSON serialization: ``to_json``, ``json_to_pyg``.
-- Blockmodel estimation & overlapping communities: ``plekton.fit``,
-  ``overlapping_communities``.
+- ``Graph``, with ``Graph.from_edge_index`` (PyG) and ``Graph.from_json``.
+- Synthetic graph generators, each returning a ``Graph``: ``generate_sbm``,
+  ``generate_sbm_from_fit``, ``generate_csbm``, ``generate_ba``, ``mixing_graph``.
+- Canonical JSON: ``to_json(graph)``, and the JSON-to-JSON contract entry points
+  ``generate_from_config`` and ``generate_mixing_graph_json``.
+- Blockmodel estimation & community detection: ``plekton.fit``.
 - Structural graph metrics: ``plekton.metrics``.
 - Edge scoring & spectral/backbone sparsification: ``plekton.sparsify``.
 - Leakage-free group & temporal ML splitters: ``plekton.splits``.
+
+Every randomised function takes ``seed=None`` by default, which draws a seed; the
+generators record the seed that ran in ``graph.metadata["seed"]``.
 
 Optional extras::
 
@@ -32,15 +38,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from plekton import fit, metrics, sparsify, splits
-from plekton._plekton import (
-    generate_ba,
-    generate_csbm,
-    generate_from_config,
-    generate_sbm,
-    generate_sbm_from_fit,
-    json_to_pyg,
-    overlapping_communities,
-)
+from plekton._generators import generate_ba, generate_csbm, generate_sbm, generate_sbm_from_fit
+from plekton._graph import Graph
+from plekton._plekton import generate_from_config
 from plekton._plekton import (
     graph_to_json as _graph_to_json,
 )
@@ -49,32 +49,53 @@ from plekton.mixing import generate_mixing_graph_json, mixing_graph
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from numpy.typing import ArrayLike
-
 
 def to_json(
-    edge_index: ArrayLike,
-    labels: ArrayLike,
-    x: ArrayLike | None = None,
+    graph: Graph,
     *,
     path: str | Path | None = None,
+    drop_edge_attrs: bool = False,
 ) -> str:
-    """Serialise generator NumPy arrays into canonical ``plekton.graph/v1`` JSON.
+    """Serialise a :class:`Graph` into canonical ``plekton.graph/v1`` JSON.
 
-    Works uniformly with outputs from :func:`generate_sbm`,
-    :func:`generate_sbm_from_fit`, :func:`generate_csbm`, and
-    :func:`generate_ba`. Accepts either bidirectional ``[2, 2E]`` or canonical
-    ``[2, E]`` ``edge_index`` arrays. When *path* is given, the JSON document
-    is also written to that file.
+    When *path* is given, the document is also written to that file. Nodes
+    without ``labels`` are written in community ``0``.
+
+    ``plekton.graph/v1`` is undirected and has no field for edge attributes, so
+    nothing is dropped silently: a directed graph raises, and so does a graph
+    with ``edge_attrs`` unless ``drop_edge_attrs=True`` says to write it without
+    them.
     """
-    ei = np.ascontiguousarray(edge_index, dtype=np.int64)
-    lbl = np.ascontiguousarray(labels, dtype=np.int64)
-    feats = None if x is None else np.ascontiguousarray(x, dtype=np.float32)
+    if not isinstance(graph, Graph):
+        msg = (
+            f"to_json takes a plekton.Graph, got {type(graph).__name__}; build one with "
+            "plekton.Graph(edges, n_nodes=...) or plekton.Graph.from_edge_index(...)"
+        )
+        raise TypeError(msg)
+    if graph.directed:
+        msg = (
+            "plekton.graph/v1 is undirected: a directed plekton.Graph cannot be written "
+            "without losing the direction of its arcs"
+        )
+        raise ValueError(msg)
+    if graph.edge_attrs and not drop_edge_attrs:
+        names = ", ".join(sorted(graph.edge_attrs))
+        msg = (
+            f"plekton.graph/v1 has no field for edge attributes ({names}); pass "
+            "drop_edge_attrs=True to write the graph without them"
+        )
+        raise ValueError(msg)
+    labels = graph.labels
+    if labels is None:
+        labels = np.zeros(graph.n_nodes, dtype=np.int64)
+    x = None if graph.x is None else np.ascontiguousarray(graph.x, dtype=np.float32)
     out_path = None if path is None else str(path)
-    return str(_graph_to_json(ei, lbl, feats, out_path))
+    # `edges.T` is a (2, E) view: the extension reads it without a copy.
+    return str(_graph_to_json(graph.edges.T, labels, x, out_path))
 
 
 __all__ = [
+    "Graph",
     "fit",
     "generate_ba",
     "generate_csbm",
@@ -82,10 +103,8 @@ __all__ = [
     "generate_mixing_graph_json",
     "generate_sbm",
     "generate_sbm_from_fit",
-    "json_to_pyg",
     "metrics",
     "mixing_graph",
-    "overlapping_communities",
     "sparsify",
     "splits",
     "to_json",

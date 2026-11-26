@@ -20,6 +20,8 @@ from typing import Any
 
 import numpy as np
 
+from plekton._seed import resolve_seed
+
 _N_SPLITS = 3
 _SPLIT_NAMES = ("train", "val", "test")
 _FRACTION_SUM_TOL = 1e-9
@@ -216,7 +218,7 @@ def _degeneracy_problems(
 def grouped_split(
     group_keys: list[str],
     fracs: tuple[float, float, float] = (0.64, 0.16, 0.20),
-    seed: int = 0,
+    seed: int | None = None,
     labels: np.ndarray | None = None,
     *,
     strict: bool = True,
@@ -228,6 +230,8 @@ def grouped_split(
     Every node sharing a group key is placed in a single split so no group
     straddles the train/val/test boundary. When binary ``labels`` (0/1) are
     supplied, positive-bearing groups are stratified across active splits.
+    ``seed=None`` draws a seed (pass one to reproduce the split); it breaks ties
+    between groups of equal size.
 
     Raises:
         DegenerateSplitError: when ``strict=True`` and realised sizes or
@@ -250,7 +254,10 @@ def grouped_split(
     else:
         positive_keys, negative_keys = [], list(groups)
 
-    masks = _GroupPacker(groups, fracs, labels, seed).pack(positive_keys, negative_keys)
+    masks = _GroupPacker(groups, fracs, labels, resolve_seed(seed)).pack(
+        positive_keys,
+        negative_keys,
+    )
     _assert_group_disjoint(masks, groups, len(group_keys))
     train_mask, val_mask, test_mask = masks
 

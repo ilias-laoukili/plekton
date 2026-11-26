@@ -20,21 +20,26 @@ below it, heterophilous::
         mixing={"sex": {"within": 0.0}},
         seed=1,
     )
-    graph["edges"]          # np.ndarray of shape (E, 2), dtype int64
-    graph["mixing"]["sex"]  # {"target": 0.0, "within": 0.0, "random": 0.5, "r": -1.0}
+    graph.edges                     # read-only int64 array of shape (E, 2)
+    graph.metadata["mixing"]["sex"]  # {"target": 0.0, "within": 0.0, "random": 0.5, "r": -1.0}
 
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from plekton._graph import trusted_graph
 from plekton._plekton import (
     generate_mixing_graph_json_py as generate_mixing_graph_json,
 )
 from plekton._plekton import (
     mixing_graph_native,
 )
+from plekton._seed import resolve_seed
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from plekton._graph import Graph
 
 __all__ = ["generate_mixing_graph_json", "mixing_graph"]
 
@@ -54,13 +59,17 @@ def mixing_graph(  # noqa: PLR0913 - one keyword argument per field of MixingReq
     directed: bool = False,
     popularity_spread: float = 0.0,
     seed: int | None = None,
-) -> dict[str, Any]:
-    """Generate a graph with per-attribute mixing targets (zero-copy NumPy arrays).
+) -> Graph:
+    """Generate a graph with per-attribute mixing targets.
 
-    Returns ``{"edges", "directed", "wanted_degree", "mean_degree", "mixing",
-    "clustering"}``, plus ``"strengths"`` when ``strength`` is provided.
-    ``edges`` is an ``int64`` NumPy array of shape ``(E, 2)``.
+    Returns a :class:`plekton.Graph`: undirected (each edge once, ``u < v``) or,
+    with ``directed=True``, one row per arc. ``metadata`` holds the
+    ``wanted_degree``, the realised ``mean_degree``, one ``mixing`` report per
+    attribute (``target``, ``within``, ``random``, ``r``), the ``clustering``
+    report and the ``seed`` that ran. With ``strength``, the tie strengths are in
+    ``edge_attrs["strength"]``, one per edge.
     """
+    used = resolve_seed(seed)
     result: dict[str, Any] = mixing_graph_native(
         nodes,
         attributes=attributes,
@@ -74,6 +83,19 @@ def mixing_graph(  # noqa: PLR0913 - one keyword argument per field of MixingReq
         strength=strength,
         directed=directed,
         popularity_spread=popularity_spread,
-        seed=seed,
+        seed=used,
     )
-    return result
+    strengths = result.get("strengths")
+    return trusted_graph(
+        result["edges"],
+        nodes,
+        directed=bool(result["directed"]),
+        metadata={
+            "wanted_degree": result["wanted_degree"],
+            "mean_degree": result["mean_degree"],
+            "mixing": result["mixing"],
+            "clustering": result["clustering"],
+            "seed": used,
+        },
+        edge_attrs=None if strengths is None else {"strength": strengths},
+    )

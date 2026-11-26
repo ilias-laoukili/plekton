@@ -1,23 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ilias Laoukili
-"""Structural graph metrics over plain edge lists (wrapping ``plekton-metrics``).
+"""Structural graph metrics (wrapping ``plekton-metrics``).
 
-Metrics that are mathematically undefined or skipped above a size threshold
-return ``None`` rather than fabricating ``0.0``.
+Every function takes a :class:`plekton.Graph` first. An ``(E, 2)`` edge array is
+also accepted when ``n_nodes`` is passed by keyword; it is validated like a
+``Graph`` (no ``(2, E)`` layout, no edge in both directions, ids in range,
+integer dtype). Metrics that are mathematically undefined or skipped above a
+size threshold return ``None`` rather than fabricating ``0.0``::
+
+    import plekton
+
+    graph = plekton.generate_sbm(500, 4, 0.1, 0.01, seed=0)
+    plekton.metrics.homophily(graph)       # uses graph.labels
+    plekton.metrics.degree_summary(graph)  # {"mean", "max", "p50", "p90", "p99", "gini"}
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-
+from plekton._graph import Graph, as_graph, node_labels
 from plekton._plekton import metrics as _ext
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     import numpy.typing as npt
-
-_EDGE_PAIR_NDIM = 2
 
 __all__ = [
     "assortativity",
@@ -32,78 +38,90 @@ __all__ = [
 ]
 
 
-def _edges(edges: npt.ArrayLike) -> np.ndarray:
-    """Coerce ``edges`` to a contiguous ``int64`` array of shape ``[E, 2]``."""
-    arr = np.ascontiguousarray(edges, dtype=np.int64)
-    if arr.size == 0:
-        return np.zeros((0, _EDGE_PAIR_NDIM), dtype=np.int64)
-    if arr.ndim != _EDGE_PAIR_NDIM or arr.shape[1] != _EDGE_PAIR_NDIM:
-        msg = f"edges must have shape [E, 2], got {arr.shape}"
-        raise ValueError(msg)
-    return arr
+def homophily(
+    graph: Graph | npt.ArrayLike,
+    *,
+    labels: npt.ArrayLike | None = None,
+    n_nodes: int | None = None,
+) -> float | None:
+    """Edge homophily (fraction of intra-community edges), or ``None`` if undefined.
 
-
-def _labels(labels: npt.ArrayLike) -> np.ndarray:
-    """Coerce ``labels`` to a contiguous 1-D ``int64`` array."""
-    arr = np.ascontiguousarray(labels, dtype=np.int64)
-    if arr.ndim != 1:
-        msg = f"labels must be 1-D, got shape {arr.shape}"
-        raise ValueError(msg)
-    return arr
-
-
-def homophily(edges: npt.ArrayLike, labels: npt.ArrayLike) -> float | None:
-    """Edge homophily (fraction of intra-community edges), or ``None`` if undefined."""
-    val: float | None = _ext.homophily(_edges(edges), _labels(labels))
+    ``labels`` defaults to ``graph.labels``. Directed graphs count arcs.
+    """
+    g = as_graph(graph, n_nodes, caller="metrics.homophily", allow_directed=True)
+    val: float | None = _ext.homophily(g.edges, node_labels(g, labels, caller="metrics.homophily"))
     return val
 
 
-def clustering(n_nodes: int, edges: npt.ArrayLike) -> float | None:
+def attribute_mixing(
+    graph: Graph | npt.ArrayLike,
+    *,
+    labels: npt.ArrayLike | None = None,
+    n_nodes: int | None = None,
+) -> dict[str, Any] | None:
+    """Attribute mixing ``{"within", "random", "r"}``, or ``None`` if edgeless.
+
+    ``labels`` defaults to ``graph.labels``. Directed graphs count arcs.
+    """
+    g = as_graph(graph, n_nodes, caller="metrics.attribute_mixing", allow_directed=True)
+    lbls = node_labels(g, labels, caller="metrics.attribute_mixing")
+    val: dict[str, Any] | None = _ext.attribute_mixing(g.edges, lbls)
+    return val
+
+
+def clustering(graph: Graph | npt.ArrayLike, *, n_nodes: int | None = None) -> float | None:
     """Mean local clustering coefficient, or ``None`` above the size threshold."""
-    val: float | None = _ext.clustering(n_nodes, _edges(edges))
+    g = as_graph(graph, n_nodes, caller="metrics.clustering")
+    val: float | None = _ext.clustering(g.n_nodes, g.edges)
     return val
 
 
-def transitivity(n_nodes: int, edges: npt.ArrayLike) -> float | None:
+def transitivity(graph: Graph | npt.ArrayLike, *, n_nodes: int | None = None) -> float | None:
     """Global transitivity (3 * triangles / open_triplets), or ``None`` if undefined."""
-    val: float | None = _ext.transitivity(n_nodes, _edges(edges))
+    g = as_graph(graph, n_nodes, caller="metrics.transitivity")
+    val: float | None = _ext.transitivity(g.n_nodes, g.edges)
     return val
 
 
-def assortativity(n_nodes: int, edges: npt.ArrayLike) -> float | None:
+def assortativity(graph: Graph | npt.ArrayLike, *, n_nodes: int | None = None) -> float | None:
     """Newman's degree assortativity r, or ``None`` if edgeless or regular."""
-    val: float | None = _ext.assortativity(n_nodes, _edges(edges))
+    g = as_graph(graph, n_nodes, caller="metrics.assortativity")
+    val: float | None = _ext.assortativity(g.n_nodes, g.edges)
     return val
 
 
-def components(n_nodes: int, edges: npt.ArrayLike) -> int:
-    """Count weakly connected components."""
-    return int(_ext.components(n_nodes, _edges(edges)))
+def components(graph: Graph | npt.ArrayLike, *, n_nodes: int | None = None) -> int:
+    """Count connected components, isolated nodes included."""
+    g = as_graph(graph, n_nodes, caller="metrics.components")
+    return int(_ext.components(g.n_nodes, g.edges))
 
 
-def density(n_nodes: int, n_edges: int) -> float:
+def density(graph: Graph | npt.ArrayLike, *, n_nodes: int | None = None) -> float:
     """Undirected graph density: ``2E / (N * (N - 1))``."""
-    return float(_ext.density(n_nodes, n_edges))
+    g = as_graph(graph, n_nodes, caller="metrics.density")
+    return float(_ext.density(g.n_nodes, g.n_edges))
 
 
-def attribute_mixing(edges: npt.ArrayLike, labels: npt.ArrayLike) -> dict[str, Any] | None:
-    """Attribute mixing: ``{"within", "random", "r"}``, or ``None`` if edgeless."""
-    val: dict[str, Any] | None = _ext.attribute_mixing(_edges(edges), _labels(labels))
-    return val
-
-
-def degree_summary(n_nodes: int, edges: npt.ArrayLike) -> dict[str, Any] | None:
+def degree_summary(
+    graph: Graph | npt.ArrayLike,
+    *,
+    n_nodes: int | None = None,
+) -> dict[str, Any] | None:
     """Degree summary: ``{"mean", "max", "p50", "p90", "p99", "gini"}``."""
-    val: dict[str, Any] | None = _ext.degree_summary(n_nodes, _edges(edges))
+    g = as_graph(graph, n_nodes, caller="metrics.degree_summary")
+    val: dict[str, Any] | None = _ext.degree_summary(g.n_nodes, g.edges)
     return val
 
 
 def degree_ks(
-    n_nodes_a: int,
-    edges_a: npt.ArrayLike,
-    n_nodes_b: int,
-    edges_b: npt.ArrayLike,
+    graph_a: Graph | npt.ArrayLike,
+    graph_b: Graph | npt.ArrayLike,
+    *,
+    n_nodes_a: int | None = None,
+    n_nodes_b: int | None = None,
 ) -> float | None:
     """Two-sample KS distance in ``[0, 1]`` between two graphs' degree distributions."""
-    val: float | None = _ext.degree_ks(n_nodes_a, _edges(edges_a), n_nodes_b, _edges(edges_b))
+    a = as_graph(graph_a, n_nodes_a, caller="metrics.degree_ks")
+    b = as_graph(graph_b, n_nodes_b, caller="metrics.degree_ks")
+    val: float | None = _ext.degree_ks(a.n_nodes, a.edges, b.n_nodes, b.edges)
     return val

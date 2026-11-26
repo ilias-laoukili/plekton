@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ilias Laoukili
-"""Type stubs for the compiled Rust extension ``plekton._plekton``."""
+"""Type stubs for the compiled Rust extension ``plekton._plekton``.
+
+Low-level surface: every argument is explicit (seeds included) and edges are
+``int64[E, 2]`` arrays. The public API in ``plekton`` wraps these into
+:class:`plekton.Graph`.
+"""
 
 from collections.abc import Sequence
 from typing import Any
@@ -15,36 +20,36 @@ def generate_sbm(
     n_communities: int,
     p_in: float,
     p_out: float,
-    theta_exponent: float | None = None,
-    seed: int | None = None,
+    theta_exponent: float | None,
+    seed: int,
 ) -> tuple[NDArray[np.int64], NDArray[np.int64], float]:
     """Generate an SBM or exact O(N + E) DC-SBM graph.
 
-    Returns ``(edge_index [2, 2E], labels [N], effective_h)``.
+    Returns ``(edges [E, 2], labels [N], effective_h)``.
     """
 
 def generate_sbm_from_fit(
     n_nodes: int,
     block_sizes: Sequence[int],
     b_matrix: NDArray[np.float64],
-    theta: NDArray[np.float64] | None = None,
-    seed: int | None = None,
+    theta: NDArray[np.float64] | None,
+    seed: int,
 ) -> tuple[NDArray[np.int64], NDArray[np.int64], float]:
     """Generate a graph from an arbitrary fitted blockmodel ``(block_sizes, b_matrix, theta)``.
 
-    Returns ``(edge_index [2, 2E], labels [N], effective_h)``.
+    Returns ``(edges [E, 2], labels [N], effective_h)``.
     """
 
 def generate_ba(
     n_nodes: int,
-    m: int = 2,
-    m0: int | None = None,
-    n_communities: int = 1,
-    seed: int | None = None,
+    m: int,
+    m0: int | None,
+    n_communities: int,
+    seed: int,
 ) -> tuple[NDArray[np.int64], NDArray[np.int64], float]:
     """Generate a Barabási–Albert preferential-attachment graph.
 
-    Returns ``(edge_index [2, 2E], labels [N], effective_h)``.
+    Returns ``(edges [E, 2], labels [N], effective_h)``.
     """
 
 def generate_csbm(
@@ -54,22 +59,22 @@ def generate_csbm(
     avg_degree: float,
     feat_dim: int,
     mu: float,
-    feature_dist: str = "gaussian",
-    class_weights: Sequence[float] | None = None,
-    theta_exponent: float | None = None,
-    p_triangle: float = 0.0,
-    feat_noise_ratio: float = 0.0,
-    ensure_connected: bool = False,
-    p_in_override: float | None = None,
-    p_out_override: float | None = None,
-    b_matrix: Sequence[float] | None = None,
-    centroids: Sequence[float] | None = None,
-    covariance: Sequence[float] | None = None,
-    seed: int | None = None,
+    feature_dist: str,
+    class_weights: Sequence[float] | None,
+    theta_exponent: float | None,
+    p_triangle: float,
+    feat_noise_ratio: float,
+    ensure_connected: bool,
+    p_in_override: float | None,
+    p_out_override: float | None,
+    b_matrix: Sequence[float] | None,
+    centroids: Sequence[float] | None,
+    covariance: Sequence[float] | None,
+    seed: int,
 ) -> tuple[NDArray[np.int64], NDArray[np.float32], NDArray[np.int64], float]:
     """Generate a contextual SBM graph with correlated node features.
 
-    Returns ``(edge_index [2, 2E], x [N, F], labels [N], effective_h)``.
+    Returns ``(edges [E, 2], x [N, F], labels [N], effective_h)``.
     """
 
 # ─── JSON serialization & config dispatch ────────────────────────────────────
@@ -80,41 +85,32 @@ def graph_to_json(
     x: NDArray[np.float32] | None = None,
     path: str | None = None,
 ) -> str:
-    """Serialise ``(edge_index, labels, optional x)`` to canonical ``plekton.graph/v1`` JSON."""
+    """Serialise ``(edge_index [2, M], labels, optional x)`` to canonical ``plekton.graph/v1`` JSON."""
 
-def json_to_pyg(
+def json_to_graph(
     json_str: str,
-) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.float32] | None]:
-    """Parse canonical ``plekton.graph/v1`` JSON into ``(edge_index [2, 2E], labels [N], x?)``."""
+) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.float32] | None, str]:
+    """Parse ``plekton.graph/v1`` JSON into ``(edges [E, 2], labels [N], x?, metadata JSON)``."""
 
 def generate_from_config(config_json: str) -> str:
     """Generate a graph from a JSON configuration contract and return ``plekton.graph/v1`` JSON."""
-
-def overlapping_communities(
-    n_nodes: int,
-    edges: Sequence[tuple[int, int]],
-    seed: int = 0,
-    rounds: int = 100,
-    threshold: float = 0.2,
-) -> list[list[int]]:
-    """Detect overlapping communities via SLPA (Xie, Szymanski & Liu, 2011)."""
 
 # ─── Multi-attribute mixing graphs ───────────────────────────────────────────
 
 def mixing_graph_native(
     nodes: int,
-    attributes: dict[str, list[str]] | None = None,
-    groups: list[str | None] | None = None,
-    degrees: list[int] | None = None,
-    mean_degree: float | None = None,
-    degree_spread: float = 0.0,
-    max_degree: int | None = None,
-    mixing: dict[str, dict[str, Any]] | None = None,
-    clustering: float | None = None,
-    strength: dict[str, Any] | None = None,
-    directed: bool = False,
-    popularity_spread: float = 0.0,
-    seed: int | None = None,
+    attributes: dict[str, list[str]] | None,
+    groups: list[str | None] | None,
+    degrees: list[int] | None,
+    mean_degree: float | None,
+    degree_spread: float,
+    max_degree: int | None,
+    mixing: dict[str, dict[str, Any]] | None,
+    clustering: float | None,
+    strength: dict[str, Any] | None,
+    directed: bool,
+    popularity_spread: float,
+    seed: int,
 ) -> dict[str, Any]:
     """Generate a multi-attribute mixing graph with zero-copy NumPy arrays."""
 
@@ -130,10 +126,10 @@ class fit:  # noqa: N801 - mirrors PyO3 submodule name
     def fit_blockmodel(
         edges: NDArray[np.int64],
         n_nodes: int,
-        labels: NDArray[np.int64] | None = None,
-        attribute: str = "labels",
-        seed: int = 0,
-        max_rounds: int = 30,
+        labels: NDArray[np.int64] | None,
+        attribute: str,
+        seed: int,
+        max_rounds: int,
     ) -> dict[str, Any]:
         """Estimate DC-SBM block sizes, K×K mixing matrix, and per-node degree weights θ."""
 
@@ -141,18 +137,18 @@ class fit:  # noqa: N801 - mirrors PyO3 submodule name
     def label_propagation(
         edges: NDArray[np.int64],
         n_nodes: int,
-        seed: int = 0,
-        max_rounds: int = 30,
+        seed: int,
+        max_rounds: int,
     ) -> tuple[NDArray[np.int64], bool]:
         """Run asynchronous seeded label propagation; returns ``(labels [N], converged)``."""
 
     @staticmethod
     def overlapping_communities(
+        edges: NDArray[np.int64],
         n_nodes: int,
-        edges: Sequence[tuple[int, int]],
-        seed: int = 0,
-        rounds: int = 100,
-        threshold: float = 0.2,
+        seed: int,
+        rounds: int,
+        threshold: float,
     ) -> list[list[int]]:
         """Detect overlapping communities via SLPA."""
 
@@ -211,8 +207,7 @@ class sparsify:  # noqa: N801 - mirrors PyO3 submodule name
         edges: NDArray[np.int64],
         n_nodes: int,
         metric: str,
-        features: NDArray[np.float32] | None = None,
-        ignore_self_loops: bool = True,
+        features: NDArray[np.float32] | None,
     ) -> NDArray[np.float64]:
         """Compute per-edge similarity scores (``jaccard``, ``adamic_adar``, ``degree_product``, ``feature_cosine``)."""
 
@@ -220,9 +215,9 @@ class sparsify:  # noqa: N801 - mirrors PyO3 submodule name
     def approx_effective_resistance(
         edges: NDArray[np.int64],
         n_nodes: int,
-        epsilon: float = 0.3,
-        seed: int = 42,
-        max_dim: int | None = None,
+        epsilon: float,
+        seed: int,
+        max_dim: int | None,
     ) -> NDArray[np.float64]:
         """Compute per-edge Spielman–Srivastava approximate effective resistance."""
 
@@ -233,10 +228,10 @@ class sparsify:  # noqa: N801 - mirrors PyO3 submodule name
         scores: NDArray[np.float64],
         strategy: str,
         retention_ratio: float,
-        keep_lowest: bool = False,
-        min_per_node: int = 1,
-        seed: int = 42,
-        preserve_connectivity: bool = True,
+        keep_lowest: bool,
+        min_per_node: int,
+        seed: int,
+        preserve_connectivity: bool,
     ) -> NDArray[np.bool_]:
         """Select edges under ``threshold``, ``degree_aware``, or ``sampled`` strategy."""
 
@@ -245,7 +240,7 @@ class sparsify:  # noqa: N801 - mirrors PyO3 submodule name
         edges: NDArray[np.int64],
         n_nodes: int,
         distances: NDArray[np.float64],
-        epsilon: float = 1e-9,
-        distances_are_similarity: bool = False,
+        epsilon: float,
+        distances_are_similarity: bool,
     ) -> NDArray[np.bool_]:
         """Keep shortest-path-preserving metric-backbone edges."""

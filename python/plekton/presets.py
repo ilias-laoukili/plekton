@@ -7,11 +7,12 @@ Each preset is a ready-to-use config dict that can be passed directly to
 
 Quick start
 -----------
+>>> import json
+>>> import plekton
 >>> from plekton.presets import get_preset, list_presets
->>> import plekton as gg, json
 >>> cfg = get_preset("sbm-balanced")
->>> graph = json.loads(gg.generate_from_config(json.dumps(cfg)))
->>> graph["metadata"]
+>>> graph = plekton.Graph.from_json(plekton.generate_from_config(json.dumps(cfg)))
+>>> graph.metadata["homophily"]
 """
 
 from __future__ import annotations

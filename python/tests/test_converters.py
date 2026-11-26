@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ilias Laoukili
-"""Tests for the graph converters (``to_pyg``, ``to_networkx``) and NumPy generators."""
+"""Tests for the generators (each returns a ``plekton.Graph``) and the graph converters."""
 
 from __future__ import annotations
 
@@ -16,12 +16,10 @@ _N_NODES_CSBM = 120
 _FEAT_DIM_CSBM = 16
 _N_NODES_SBM = 200
 _EDGE_INDEX_ROWS = 2
-_SBM_TUPLE_LEN = 3
-_CSBM_TUPLE_LEN = 4
 _N_COMMUNITIES_MAX = 5
 
 try:
-    import plekton as gg
+    import plekton
 
     _HAS_PLEKTON = True
 except ImportError:
@@ -66,150 +64,179 @@ requires_networkx = pytest.mark.skipif(
 
 
 def _sbm_json() -> str:
-    """Build a small unlabeled SBM graph (no node features)."""
-    edge_index, labels, _ = gg.generate_sbm(200, 4, 0.3, 0.02, seed=0)
-    return gg.to_json(edge_index, labels)
+    """Build a small SBM graph (no node features) as JSON."""
+    return plekton.to_json(plekton.generate_sbm(200, 4, 0.3, 0.02, seed=0))
 
 
 def _csbm_json() -> str:
-    """Build a small labelled cSBM graph."""
-    edge_index, x, labels, _ = gg.generate_csbm(120, 2, 0.85, 8.0, 16, 1.2, seed=42)
-    return gg.to_json(edge_index, labels, x)
+    """Build a small labelled cSBM graph as JSON."""
+    return plekton.to_json(plekton.generate_csbm(120, 2, 0.85, 8.0, 16, 1.2, seed=42))
 
 
-# ── generate_sbm / generate_ba / generate_csbm (raw numpy output) ─────────────
+# ── generate_sbm / generate_ba / generate_csbm (plekton.Graph output) ─────────
 
 
 @requires_plekton
 class TestGenerateSBM:
-    """The Rust zero-copy numpy bridge that ``to_pyg`` is built on."""
+    """The Rust generators hand their canonical edges over as a ``plekton.Graph``."""
 
-    def test_returns_three_arrays(self) -> None:
-        """Returns three arrays."""
-        result = gg.generate_sbm(n_nodes=200, n_communities=4, p_in=0.15, p_out=0.01, seed=0)
-        assert len(result) == _SBM_TUPLE_LEN
+    def test_returns_a_graph(self) -> None:
+        """Returns a Graph with labels and the measured homophily."""
+        graph = plekton.generate_sbm(200, 4, p_in=0.15, p_out=0.01, seed=0)
+        assert isinstance(graph, plekton.Graph)
+        assert graph.n_nodes == _N_NODES_SBM
+        assert 0.0 <= graph.metadata["homophily"] <= 1.0
+        assert graph.metadata["seed"] == 0
 
-    def test_edge_index_shape(self) -> None:
-        """Edge index shape."""
-        edge_index, _labels, _h = gg.generate_sbm(
-            n_nodes=200,
-            n_communities=4,
-            p_in=0.15,
-            p_out=0.01,
-            seed=0,
-        )
-        assert edge_index.ndim == _EDGE_INDEX_ROWS
-        assert edge_index.shape[0] == _EDGE_INDEX_ROWS
-        assert edge_index.shape[1] % 2 == 0  # bidirectional
+    def test_edges_are_canonical_and_edge_index_bidirectional(self) -> None:
+        """Edges are (E, 2) with u < v; edge_index lists them, then their reverses."""
+        graph = plekton.generate_sbm(200, 4, p_in=0.15, p_out=0.01, seed=0)
+        edges = graph.edges
+        assert edges.shape == (graph.n_edges, 2)
+        assert edges.dtype == np.int64
+        assert edges.flags.c_contiguous
+        assert np.all(edges[:, 0] < edges[:, 1])
+        edge_index = graph.edge_index
+        assert edge_index.shape == (_EDGE_INDEX_ROWS, 2 * graph.n_edges)
+        np.testing.assert_array_equal(edge_index[:, : graph.n_edges], edges.T)
+        np.testing.assert_array_equal(edge_index[:, graph.n_edges :], edges[:, ::-1].T)
 
     def test_labels_shape_and_range(self) -> None:
         """Labels shape and range."""
-        _edge_index, labels, _h = gg.generate_sbm(
-            n_nodes=300,
-            n_communities=5,
-            p_in=0.2,
-            p_out=0.01,
-            seed=1,
-        )
+        graph = plekton.generate_sbm(300, 5, p_in=0.2, p_out=0.01, seed=1)
+        labels = graph.labels
+        assert labels is not None
         assert labels.shape == (300,)
         assert int(labels.min()) >= 0
         assert int(labels.max()) < _N_COMMUNITIES_MAX
 
     def test_reproducibility_same_seed(self) -> None:
         """Reproducibility same seed."""
-        r1 = gg.generate_sbm(n_nodes=200, n_communities=4, p_in=0.15, p_out=0.01, seed=42)
-        r2 = gg.generate_sbm(n_nodes=200, n_communities=4, p_in=0.15, p_out=0.01, seed=42)
-        np.testing.assert_array_equal(r1[0], r2[0])
-        np.testing.assert_array_equal(r1[1], r2[1])
-        assert r1[2] == r2[2]
+        g1 = plekton.generate_sbm(200, 4, p_in=0.15, p_out=0.01, seed=42)
+        g2 = plekton.generate_sbm(200, 4, p_in=0.15, p_out=0.01, seed=42)
+        np.testing.assert_array_equal(g1.edges, g2.edges)
+        np.testing.assert_array_equal(g1.labels, g2.labels)
+        assert g1.metadata == g2.metadata
+
+    def test_a_drawn_seed_is_recorded_and_reproduces_the_graph(self) -> None:
+        """seed=None draws a seed; the recorded one regenerates the same graph."""
+        first = plekton.generate_sbm(200, 4, p_in=0.15, p_out=0.01)
+        again = plekton.generate_sbm(200, 4, p_in=0.15, p_out=0.01, seed=first.metadata["seed"])
+        np.testing.assert_array_equal(first.edges, again.edges)
 
 
 @requires_plekton
 class TestGenerateBA:
-    """Zero-copy NumPy Barabási–Albert generator."""
+    """Barabási–Albert generator."""
 
     def test_ba_shape_and_reproducibility(self) -> None:
-        """BA produces expected edge count (1 + 98*2 = 197 canonical -> 394 directed)."""
-        ei1, labels1, _ = gg.generate_ba(n_nodes=100, m=2, m0=2, n_communities=4, seed=42)
-        ei2, labels2, _ = gg.generate_ba(n_nodes=100, m=2, m0=2, n_communities=4, seed=42)
-        assert ei1.shape == (2, 394)
-        assert labels1.shape == (100,)
-        np.testing.assert_array_equal(ei1, ei2)
-        np.testing.assert_array_equal(labels1, labels2)
+        """BA produces the expected edge count (1 + 98 * 2 = 197)."""
+        g1 = plekton.generate_ba(100, m=2, m0=2, n_communities=4, seed=42)
+        g2 = plekton.generate_ba(100, m=2, m0=2, n_communities=4, seed=42)
+        assert g1.n_edges == 197
+        assert g1.edge_index.shape == (2, 394)
+        assert g1.labels is not None
+        assert g1.labels.shape == (100,)
+        np.testing.assert_array_equal(g1.edges, g2.edges)
+        np.testing.assert_array_equal(g1.labels, g2.labels)
 
     def test_m1_leaves_no_node_isolated(self) -> None:
         """With m = 1 every node, the seed node included, gets an edge: a tree on n nodes."""
-        edge_index, _labels, _h = gg.generate_ba(n_nodes=30, m=1, seed=0)
-        assert edge_index.shape == (2, 2 * 29)
-        degrees = np.bincount(edge_index[0], minlength=30)
+        graph = plekton.generate_ba(30, m=1, seed=0)
+        assert graph.n_edges == 29
+        degrees = np.bincount(graph.edges.ravel(), minlength=30)
         assert degrees.min() >= 1, f"isolated node in {degrees.tolist()}"
 
 
 @requires_plekton
 class TestGenerateCSBM:
-    """The Rust cSBM bridge (edge_index, x, labels, effective_h)."""
+    """The Rust cSBM bridge: edges, features and labels in one Graph."""
 
-    def test_returns_four_arrays(self) -> None:
-        """Returns four arrays."""
-        result = gg.generate_csbm(
-            n_nodes=200,
-            n_communities=3,
+    def test_returns_a_graph_with_features(self) -> None:
+        """Returns a Graph whose x has one row per node."""
+        graph = plekton.generate_csbm(
+            200,
+            3,
             homophily=0.8,
             avg_degree=10.0,
             feat_dim=16,
             mu=1.0,
             seed=0,
         )
-        assert len(result) == _CSBM_TUPLE_LEN
+        assert isinstance(graph, plekton.Graph)
+        assert graph.x is not None
+        assert graph.x.shape == (200, 16)
 
     def test_feature_matrix_shape_and_finite(self) -> None:
         """Feature matrix shape and finite."""
-        _edge_index, x, _labels, _h = gg.generate_csbm(
-            n_nodes=500,
-            n_communities=4,
+        graph = plekton.generate_csbm(
+            500,
+            4,
             homophily=0.7,
             avg_degree=8.0,
             feat_dim=32,
             mu=1.5,
             seed=5,
         )
+        x = graph.x
+        assert x is not None
         assert x.shape == (500, 32)
+        assert x.dtype == np.float32
         assert np.all(np.isfinite(x)), "cSBM features contain NaN or Inf"
 
 
 @requires_plekton
 class TestToJson:
-    """Unified ``plekton.to_json`` serializer across all generators."""
+    """``plekton.to_json`` serialises any undirected Graph."""
 
     def test_sbm_round_trip_and_file_write(self, tmp_path: Path) -> None:
-        """Serializes SBM arrays to JSON string and optional file path."""
-        edge_index, labels, _ = gg.generate_sbm(80, 4, 0.25, 0.02, seed=7)
+        """Serializes a Graph to a JSON string and an optional file; from_json reads it back."""
+        graph = plekton.generate_sbm(80, 4, 0.25, 0.02, seed=7)
         out = tmp_path / "sbm.json"
-        doc_str = gg.to_json(edge_index, labels, path=out)
+        doc_str = plekton.to_json(graph, path=out)
         assert out.read_text(encoding="utf-8") == doc_str
         doc = json.loads(doc_str)
         assert doc["metadata"]["schema"] == "plekton.graph/v1"
         assert doc["metadata"]["n_nodes"] == 80
-        assert doc["metadata"]["n_edges"] == edge_index.shape[1] // 2
-        ei2, lbl2, x2 = gg.json_to_pyg(doc_str)
-        assert ei2.shape == edge_index.shape
-        np.testing.assert_array_equal(lbl2, labels)
-        assert x2 is None
+        assert doc["metadata"]["n_edges"] == graph.n_edges
+        back = plekton.Graph.from_json(doc_str)
+        assert back.edge_index.shape == graph.edge_index.shape
+        np.testing.assert_array_equal(back.labels, graph.labels)
+        assert back.x is None
+        assert back.metadata["schema"] == "plekton.graph/v1"
 
     def test_csbm_and_ba_serialize_uniformly(self) -> None:
         """Both cSBM (with features) and BA (without features) serialize cleanly."""
-        ei_c, x_c, lbl_c, _ = gg.generate_csbm(60, 3, 0.8, 6.0, 8, 1.0, seed=3)
-        ei2, lbl2, x2 = gg.json_to_pyg(gg.to_json(ei_c, lbl_c, x_c))
-        assert x2 is not None
-        assert x2.shape == x_c.shape
-        np.testing.assert_allclose(x2, x_c, atol=1e-6)
-        np.testing.assert_array_equal(lbl2, lbl_c)
-        assert ei2.shape == ei_c.shape
+        csbm = plekton.generate_csbm(60, 3, 0.8, 6.0, 8, 1.0, seed=3)
+        back = plekton.Graph.from_json(plekton.to_json(csbm))
+        assert back.x is not None
+        assert csbm.x is not None
+        assert back.x.shape == csbm.x.shape
+        np.testing.assert_allclose(back.x, csbm.x, atol=1e-6)
+        np.testing.assert_array_equal(back.labels, csbm.labels)
+        assert back.n_edges == csbm.n_edges
 
-        ei_b, lbl_b, _ = gg.generate_ba(50, m=2, m0=2, n_communities=2, seed=9)
-        ba_doc = json.loads(gg.to_json(ei_b, lbl_b))
+        ba = plekton.generate_ba(50, m=2, m0=2, n_communities=2, seed=9)
+        ba_doc = json.loads(plekton.to_json(ba))
         assert ba_doc["metadata"]["n_nodes"] == 50
-        assert ba_doc["metadata"]["n_edges"] == ei_b.shape[1] // 2
+        assert ba_doc["metadata"]["n_edges"] == ba.n_edges
+
+    def test_nothing_is_dropped_silently(self) -> None:
+        """v1 is undirected and has no edge attributes: both refuse unless asked."""
+        arcs = plekton.Graph([[0, 1], [1, 0]], n_nodes=2, directed=True)
+        with pytest.raises(ValueError, match="undirected"):
+            plekton.to_json(arcs)
+        weighted = plekton.Graph([[0, 1]], n_nodes=2, edge_attrs={"strength": [0.5]})
+        with pytest.raises(ValueError, match="drop_edge_attrs=True"):
+            plekton.to_json(weighted)
+        assert json.loads(plekton.to_json(weighted, drop_edge_attrs=True))["edges"] == [
+            {"source": 0, "target": 1},
+        ]
+
+    def test_only_a_graph_is_serialised(self) -> None:
+        """A raw array is refused with a pointer to plekton.Graph."""
+        with pytest.raises(TypeError, match=r"plekton\.Graph"):
+            plekton.to_json(np.array([[0, 1]]))
 
 
 # ── to_pyg: the generic PyG dispatcher ─────────────────────────────────────────
@@ -254,6 +281,14 @@ class TestToPyg:
         assert torch.equal(d1.edge_index, d2.edge_index)
         assert torch.equal(d1.y, d2.y)
 
+    def test_from_a_graph_matches_its_json(self) -> None:
+        """A Graph converts exactly like the JSON document it serialises to."""
+        graph = plekton.generate_csbm(120, 2, 0.85, 8.0, 16, 1.2, seed=42)
+        from_graph, from_json = to_pyg(graph), to_pyg(plekton.to_json(graph))
+        assert torch.equal(from_graph.edge_index, from_json.edge_index)
+        assert torch.equal(from_graph.y, from_json.y)
+        assert torch.equal(from_graph.x, from_json.x)
+
 
 # ── to_networkx: the generic NetworkX dispatcher ───────────────────────────────
 
@@ -292,6 +327,15 @@ class TestToNetworkx:
         directed = to_networkx(j, directed=True)
         assert directed.is_directed()
         assert directed.number_of_edges() == 2 * undirected.number_of_edges()
+
+    def test_from_a_graph_matches_its_json(self) -> None:
+        """A Graph converts exactly like the JSON document it serialises to."""
+        graph = plekton.generate_sbm(200, 4, 0.3, 0.02, seed=0)
+        from_graph = to_networkx(graph)
+        from_json = to_networkx(plekton.to_json(graph))
+        assert sorted(from_graph.edges()) == sorted(from_json.edges())
+        assert dict(from_graph.nodes(data=True)) == dict(from_json.nodes(data=True))
+        assert from_graph.graph == from_json.graph
 
 
 # ── Cross-converter consistency ────────────────────────────────────────────────
@@ -387,11 +431,13 @@ class TestNetworkxToJsonMetadata:
 
     def test_a_null_homophily_is_readable_by_the_rust_reader(self) -> None:
         """A null homophily is readable by the Rust reader."""
-        # json_to_pyg (and so to_pyg) parses the metadata; a null must not break it.
-        edge_index, labels, x = gg.json_to_pyg(networkx_to_json(nx.path_graph(3)))
-        assert edge_index.shape == (_EDGE_INDEX_ROWS, 4)
-        assert labels.shape == (3,)
-        assert x is None
+        # Graph.from_json (and so to_pyg) parses the metadata; a null must not break it.
+        graph = plekton.Graph.from_json(networkx_to_json(nx.path_graph(3)))
+        assert graph.edge_index.shape == (_EDGE_INDEX_ROWS, 4)
+        assert graph.labels is not None
+        assert graph.labels.shape == (3,)
+        assert graph.x is None
+        assert graph.metadata["homophily"] is None
 
 
 @requires_plekton
@@ -402,7 +448,7 @@ def test_py_typed_and_stubs_match_extension() -> None:
 
     import plekton._plekton as ext  # noqa: PLC0415
 
-    pkg_dir = Path(gg.__file__).resolve().parent
+    pkg_dir = Path(plekton.__file__).resolve().parent
     assert (pkg_dir / "py.typed").is_file(), "py.typed missing from installed wheel"
     stub_path = pkg_dir / "_plekton.pyi"
     assert stub_path.is_file(), "_plekton.pyi missing from installed wheel"

@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-import plekton as _rs
+from plekton._generators import generate_sbm
+from plekton._seed import resolve_seed
 
 if TYPE_CHECKING:
     from torch_geometric.data import Data
@@ -139,7 +140,11 @@ def generate_realistic(  # noqa: PLR0913 - flat SBM + feature-model generation s
     theta_exponent: float | None = None,
     seed: int | None = None,
 ) -> Data:
-    """Generate a PyG ``Data`` graph with SBM/DC-SBM topology and bootstrapped features."""
+    """Generate a PyG ``Data`` graph with SBM/DC-SBM topology and bootstrapped features.
+
+    One seed drives both the topology and the feature bootstrap; ``seed=None``
+    draws it, and ``data.seed`` records the seed that ran.
+    """
     import torch  # noqa: PLC0415 - optional extra
     from torch_geometric.data import Data  # noqa: PLC0415 - optional extra
 
@@ -157,25 +162,31 @@ def generate_realistic(  # noqa: PLR0913 - flat SBM + feature-model generation s
             float(avg_degree),
         )
 
-    edge_index_np, labels_np, effective_h = _rs.generate_sbm(
-        n_nodes=n_nodes,
-        n_communities=n_communities,
-        p_in=eff_p_in,
-        p_out=eff_p_out,
+    used = resolve_seed(seed)
+    graph = generate_sbm(
+        n_nodes,
+        n_communities,
+        eff_p_in,
+        eff_p_out,
         theta_exponent=theta_exponent,
-        seed=seed,
+        seed=used,
     )
+    labels_np = graph.labels
+    if labels_np is None:  # pragma: no cover - generate_sbm always labels its nodes
+        msg = "internal: generate_sbm returned no labels"
+        raise RuntimeError(msg)
 
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(used)
     feat_rows = [
         feature_model.sample(int(labels_np[node_idx]), 1, rng) for node_idx in range(n_nodes)
     ]
     x_np = np.concatenate(feat_rows, axis=0)
 
     return Data(
-        edge_index=torch.from_numpy(edge_index_np.copy()),
+        edge_index=torch.from_numpy(graph.edge_index),
         x=torch.from_numpy(x_np),
         y=torch.from_numpy(labels_np.copy()),
         num_nodes=n_nodes,
-        effective_h=effective_h,
+        effective_h=graph.metadata["homophily"],
+        seed=used,
     )
