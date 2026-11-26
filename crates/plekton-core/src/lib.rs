@@ -15,7 +15,7 @@
 //! `seed_from_u64(seed)` (OS entropy when the seed is `None`), and consumes it in
 //! a fixed order — block-pair sampling is intentionally sequential. The same seed
 //! therefore yields the same graph. `tests/determinism_golden.rs` pins the exact
-//! output of SBM, DC-SBM, BA and cSBM, and CI runs it on Linux and macOS.
+//! output of SBM, DC-SBM, BA and cSBM, and CI runs it on Linux, macOS and Windows.
 //! `docs/models.md` ("Determinism") lists what it does not cover: 32-bit targets,
 //! floating-point functions on untested platforms, and other minor versions of
 //! `rand` / `rand_distr`.
