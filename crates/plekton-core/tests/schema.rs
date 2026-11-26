@@ -71,7 +71,7 @@ fn generated_graph_validates_against_schema() -> TestResult {
 }
 
 /// An undefined homophily is written as `null` (with its reason), and that
-/// document both validates and is read back by the Rust reader (`json_to_pyg`'s
+/// document both validates and is read back by the Rust reader (`json_to_graph`'s
 /// path) as `None` — the producer `plekton.nx.networkx_to_json` relies on both.
 #[test]
 fn null_homophily_validates_and_reads_back_as_none() -> TestResult {
@@ -113,6 +113,49 @@ fn null_homophily_validates_and_reads_back_as_none() -> TestResult {
         !validator.is_valid(&missing),
         "homophily must stay required"
     );
+    Ok(())
+}
+
+/// `original_id`, which `plekton.nx.networkx_to_json` writes on every node when it
+/// renumbers them, is optional, holds an integer or a string, and is ignored by
+/// the Rust reader.
+#[test]
+fn original_id_is_optional_and_an_integer_or_a_string() -> TestResult {
+    let validator = validator_for("schemas/graph.schema.json")?;
+    let result = plekton::generate_sbm_core(20, 4, 0.5, 0.1, None, Some(7))?;
+    let plain = serde_json::to_value(plekton::sbm_result_to_graph_output(&result))?;
+    check(&validator, &plain, "graph without original_id")?;
+
+    // Integers and strings mixed, as for a NetworkX graph with both kinds of id.
+    let mut renumbered = plain;
+    let nodes = renumbered["nodes"]
+        .as_array_mut()
+        .ok_or("nodes is not an array")?;
+    for (index, node) in nodes.iter_mut().enumerate() {
+        let original = if index % 2 == 0 {
+            serde_json::json!(index * 10)
+        } else {
+            serde_json::json!(format!("n{index}"))
+        };
+        node.as_object_mut()
+            .ok_or("node is not an object")?
+            .insert("original_id".into(), original);
+    }
+    check(&validator, &renumbered, "graph with original_id")?;
+
+    let read: plekton::GraphOutput = serde_json::from_value(renumbered.clone())?;
+    assert_eq!(read.nodes.len(), 20);
+
+    for wrong in [
+        serde_json::json!(1.5),
+        serde_json::Value::Null,
+        serde_json::json!(true),
+        serde_json::json!([1]),
+    ] {
+        let mut bad = renumbered.clone();
+        bad["nodes"][0]["original_id"] = wrong.clone();
+        assert!(!validator.is_valid(&bad), "original_id {wrong} must fail");
+    }
     Ok(())
 }
 

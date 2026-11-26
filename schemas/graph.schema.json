@@ -127,6 +127,13 @@
             "items": {
               "type": "number"
             }
+          },
+          "original_id": {
+            "description": "Node id before renumbering. plekton.nx.networkx_to_json writes it on every node when the source ids were not exactly 0..n_nodes-1, and on none otherwise; when absent, id is the source id. Optional; the Rust reader ignores it.",
+            "type": [
+              "integer",
+              "string"
+            ]
           }
         }
       }

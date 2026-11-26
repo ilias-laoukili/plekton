@@ -4,7 +4,9 @@
 
 :func:`to_networkx` turns a :class:`plekton.Graph`, or any canonical
 ``plekton.graph/v1`` JSON document, into a NetworkX graph (without requiring
-PyTorch), and :func:`networkx_to_json` is the inverse.
+PyTorch), and :func:`networkx_to_json` is the inverse: nodes whose ids are not
+already ``0 .. n-1`` are numbered so, each keeping its NetworkX id in
+``original_id``.
 
 Requires::
 
@@ -24,6 +26,7 @@ import json
 from typing import Any
 
 import networkx as nx
+import numpy as np
 
 import plekton as _rs
 from plekton._graph import Graph
@@ -41,6 +44,8 @@ def to_networkx(
     A ``Graph`` goes through :func:`plekton.to_json` (so it must be undirected,
     and ``drop_edge_attrs=True`` is needed to leave its edge attributes behind).
     ``directed=True`` returns a ``DiGraph`` with every edge in both directions.
+    A node's ``original_id``, written by :func:`networkx_to_json`, becomes a node
+    attribute of the same name.
     """
     text = (
         _rs.to_json(graph, drop_edge_attrs=drop_edge_attrs)
@@ -59,6 +64,9 @@ def to_networkx(
         features = node.get("features")
         if features is not None:
             attrs["features"] = list(features)
+        original_id = node.get("original_id")
+        if original_id is not None:
+            attrs["original_id"] = original_id
         out.add_node(int(node["id"]), **attrs)
 
     for edge in doc.get("edges", []):
@@ -89,31 +97,71 @@ def _edge_homophily(
     return n_matching / len(canonical_edges), None
 
 
+def _original_id(node: object) -> int | str:
+    """Return the JSON value that keeps ``node``'s NetworkX id: an ``int`` or a ``str``."""
+    if isinstance(node, str):
+        return str(node)
+    if isinstance(node, (int, np.integer)):
+        return int(node)
+    msg = (
+        f"networkx_to_json: node {node!r} is neither an integer nor a string, so the "
+        "JSON cannot keep its id as original_id"
+    )
+    raise TypeError(msg)
+
+
+def _id_order(original_id: int | str) -> tuple[bool, int | str]:
+    """Sort key: integer ids in ascending order, then string ids."""
+    return isinstance(original_id, str), original_id
+
+
 def networkx_to_json(graph: nx.Graph) -> str:
     """Serialise a NetworkX graph into canonical ``plekton.graph/v1`` JSON.
+
+    A graph whose ids are already exactly ``0 .. n-1`` keeps them, and no node
+    carries ``original_id``. Otherwise every node is renumbered, integer ids in
+    ascending order and then string ids (so the numbering does not depend on the
+    order nodes were added in), and every node keeps its NetworkX id in
+    ``original_id``: the field is on all nodes or on none, and without it ``id`` is
+    the NetworkX id. :func:`to_networkx` brings ``original_id`` back as a node
+    attribute, and ``nx.relabel_nodes`` with that attribute restores the ids. A
+    node id that is neither an integer nor a string raises :class:`TypeError`.
 
     ``n_components`` counts connected components (weakly connected ones for a
     directed graph). ``homophily`` is the fraction of edges whose endpoints share a
     ``community``; it is ``None`` (JSON ``null``), with a ``metrics_skipped`` entry
     giving the reason, when the graph has no edges or no node is labelled.
     """
-    node_ids = sorted(int(n) for n in graph.nodes())
-    n_nodes = len(node_ids)
+    ordered = sorted(
+        ((_original_id(node), node) for node in graph.nodes()),
+        key=lambda pair: _id_order(pair[0]),
+    )
+    # Ids that are exactly 0..n-1 sort into their own positions: nothing to renumber.
+    renumbered = any(original_id != index for index, (original_id, _) in enumerate(ordered))
+    position = {node: index for index, (_, node) in enumerate(ordered)}
+    n_nodes = len(ordered)
 
     nodes = []
     communities: dict[int, int] = {}
-    for node_id in node_ids:
-        attrs = graph.nodes[node_id]
+    for index, (original_id, node) in enumerate(ordered):
+        attrs = graph.nodes[node]
         community = int(attrs.get("community", 0))
-        communities[node_id] = community
-        record: dict[str, object] = {"id": node_id, "community": community}
+        communities[index] = community
+        record: dict[str, object] = {"id": index}
+        if renumbered:
+            record["original_id"] = original_id
+        record["community"] = community
         features = attrs.get("features")
         if features is not None:
             record["features"] = list(features)
         nodes.append(record)
 
     canonical_edges = sorted(
-        {(min(int(u), int(v)), max(int(u), int(v))) for u, v in graph.edges() if int(u) != int(v)},
+        {
+            (min(position[u], position[v]), max(position[u], position[v]))
+            for u, v in graph.edges()
+            if u != v
+        },
     )
     n_edges = len(canonical_edges)
 

@@ -56,6 +56,35 @@ fn build_neighbour_sets(
     neighbour_sets
 }
 
+/// Build per-node neighbour lists, each sorted in ascending id order without
+/// repeats.
+///
+/// The same neighbourhoods as [`build_neighbour_sets`], in an order that does not
+/// change from one run to the next, so a floating-point sum taken over them
+/// always rounds the same way.
+fn build_sorted_neighbours(
+    n_nodes: usize,
+    edges: &[(usize, usize)],
+    ignore_self_loops: bool,
+) -> Vec<Vec<usize>> {
+    let mut neighbours: Vec<Vec<usize>> = vec![Vec::new(); n_nodes];
+    for &(u, v) in edges {
+        if u == v {
+            if !ignore_self_loops {
+                neighbours[u].push(u);
+            }
+        } else {
+            neighbours[u].push(v);
+            neighbours[v].push(u);
+        }
+    }
+    neighbours.par_iter_mut().for_each(|list| {
+        list.sort_unstable();
+        list.dedup();
+    });
+    neighbours
+}
+
 /// Count common neighbours of `u` and `v` by iterating the smaller set.
 ///
 /// Cost is `O(min(deg(u), deg(v)))`.
@@ -117,6 +146,9 @@ pub fn jaccard_scores(
 /// neighbour by `1 / ln deg(w)`, so these scores are not interchangeable with
 /// implementations of the classic form.
 ///
+/// The common neighbours of an edge are summed in ascending id order, so a
+/// score is the same bits in every run and every process.
+///
 /// # Arguments
 /// See [`jaccard_scores`].
 ///
@@ -134,8 +166,7 @@ pub fn adamic_adar_scores(
     edges: &[(usize, usize)],
     ignore_self_loops: bool,
 ) -> Vec<f64> {
-    let neighbour_sets = build_neighbour_sets(n_nodes, edges, ignore_self_loops);
-    let degrees: Vec<usize> = neighbour_sets.iter().map(HashSet::len).collect();
+    let neighbours = build_sorted_neighbours(n_nodes, edges, ignore_self_loops);
 
     edges
         .par_iter()
@@ -143,15 +174,17 @@ pub fn adamic_adar_scores(
             if ignore_self_loops && u == v {
                 return 0.0;
             }
-            let (a, b) = (&neighbour_sets[u], &neighbour_sets[v]);
+            let (a, b) = (&neighbours[u], &neighbours[v]);
             let (small, large) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+            // `small` is sorted, so the common neighbours come in ascending id
+            // order whichever list is the smaller one.
             small
                 .iter()
-                .filter(|&&w| large.contains(&w))
+                .filter(|w| large.binary_search(w).is_ok())
                 .map(|&w| {
                     // `ln_1p(deg)` == `ln(deg + 1)`, computed without the
                     // intermediate `1.0 +` rounding.
-                    let log_degree = count_to_f64(degrees[w]).ln_1p().max(1e-10);
+                    let log_degree = count_to_f64(neighbours[w].len()).ln_1p().max(1e-10);
                     1.0 / log_degree
                 })
                 .sum()

@@ -373,6 +373,86 @@ class TestNetworkxRoundTrip:
         recovered = to_networkx(networkx_to_json(directed))
         assert recovered.number_of_edges() == to_networkx(j).number_of_edges()
 
+    @pytest.mark.parametrize(
+        ("ids", "numbered"),
+        [
+            ([42, 7, 1000, 3], [3, 7, 42, 1000]),
+            (["carol", "alice", "bob", "dave"], ["alice", "bob", "carol", "dave"]),
+            ([9, "b", 4, "a"], [4, 9, "a", "b"]),
+            # 0, 1 and 2 keep their number but carry original_id too: the rule is per document.
+            ([5, 0, 2, 1], [0, 1, 2, 5]),
+        ],
+    )
+    def test_non_contiguous_ids_come_back_through_original_id(
+        self,
+        ids: list[int | str],
+        numbered: list[int | str],
+    ) -> None:
+        """Nodes are renumbered 0..n-1, and original_id, on all of them, gives the graph back."""
+        graph = nx.Graph()
+        for rank, node in enumerate(ids):
+            graph.add_node(node, community=rank % 2, features=[float(rank), 0.5])
+        graph.add_edges_from([(ids[0], ids[1]), (ids[1], ids[2]), (ids[0], ids[3])])
+
+        text = networkx_to_json(graph)
+        nodes = json.loads(text)["nodes"]
+        assert [node["id"] for node in nodes] == list(range(len(ids)))
+        assert [node["original_id"] for node in nodes] == numbered
+
+        back = to_networkx(text)
+        restored = nx.relabel_nodes(back, nx.get_node_attributes(back, "original_id"))
+        assert set(restored.nodes) == set(graph.nodes)
+        assert {frozenset(edge) for edge in restored.edges} == {
+            frozenset(edge) for edge in graph.edges
+        }
+        for node, attrs in graph.nodes(data=True):
+            assert restored.nodes[node]["community"] == attrs["community"]
+            assert restored.nodes[node]["features"] == attrs["features"]
+        # Ids are positions now, so the plekton reader accepts the document.
+        assert plekton.Graph.from_json(text).n_nodes == len(ids)
+
+    def test_an_already_numbered_graph_gives_the_same_json_as_before(self) -> None:
+        """Ids that are already exactly 0..n-1 stay, with no original_id: the JSON is unchanged."""
+        graph = nx.Graph()
+        graph.add_edge(2, 0)  # ids added out of order
+        graph.add_edge(0, 1)
+        graph.add_node(3)  # isolated
+        nx.set_node_attributes(graph, {0: 1, 1: 1, 2: 0, 3: 0}, "community")
+        nx.set_node_attributes(graph, {node: [float(node), 0.5] for node in graph}, "features")
+        # What networkx_to_json wrote for this graph before original_id existed (0c619a5).
+        before = {
+            "metadata": {
+                "schema": "plekton.graph/v1",
+                "n_nodes": 4,
+                "n_edges": 2,
+                "homophily": 0.5,
+                "avg_degree_actual": 1.0,
+                "n_components": 2,
+            },
+            "nodes": [
+                {"id": 0, "community": 1, "features": [0.0, 0.5]},
+                {"id": 1, "community": 1, "features": [1.0, 0.5]},
+                {"id": 2, "community": 0, "features": [2.0, 0.5]},
+                {"id": 3, "community": 0, "features": [3.0, 0.5]},
+            ],
+            "edges": [{"source": 0, "target": 1}, {"source": 0, "target": 2}],
+        }
+        assert networkx_to_json(graph) == json.dumps(before)
+
+        # A graph that comes from plekton is numbered already.
+        nodes = json.loads(networkx_to_json(to_networkx(_csbm_json())))["nodes"]
+        assert [node["id"] for node in nodes] == list(range(_N_NODES_CSBM))
+        assert not any("original_id" in node for node in nodes)
+
+    @pytest.mark.parametrize("node", [(0, 1), 0.5])
+    def test_an_id_json_cannot_keep_is_refused(self, node: object) -> None:
+        """A node id other than an int or a str is refused, not truncated or stringified."""
+        # 0.5 used to become node 0 through int(), merging it with any other node 0.
+        graph = nx.Graph()
+        graph.add_edge(node, "other")
+        with pytest.raises(TypeError, match="neither an integer nor a string"):
+            networkx_to_json(graph)
+
 
 def _metadata_of(graph: nx.Graph) -> dict[str, object]:
     """Return the ``metadata`` block ``networkx_to_json`` writes for ``graph``."""
