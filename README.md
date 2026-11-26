@@ -179,7 +179,7 @@ Like every graph function, `plekton.fit.overlapping_communities` takes a `plekto
 
 ## Guarantees and trade-offs
 
-- **Deterministic** — a fixed `seed` reproduces the same graph or detection: generators and detectors draw from `ChaCha8Rng` (`rand_chacha`). Golden tests pin the exact edges, labels and features of SBM, DC-SBM, BA and cSBM (`crates/plekton-core/tests/determinism_golden.rs`) and the output of label propagation and SLPA (`crates/plekton-fit/tests/determinism_golden.rs`); CI runs them on Linux and macOS. What they do not cover is listed in [docs/models.md](docs/models.md#determinism).
+- **Deterministic** — a fixed `seed` reproduces the same graph or detection: generators and detectors draw from `ChaCha8Rng` (`rand_chacha`). Golden tests pin the exact edges, labels and features of SBM, DC-SBM, BA and cSBM (`crates/plekton-core/tests/determinism_golden.rs`) and the output of label propagation and SLPA (`crates/plekton-fit/tests/determinism_golden.rs`); CI runs them on Linux, macOS and Windows. What they do not cover is listed in [docs/models.md](docs/models.md#determinism).
 - **Lean** — `import plekton` needs only NumPy; `torch`, `torch_geometric` and `networkx` come with the optional extras `pyg`, `networkx` and `all`.
 - **Zero-copy** — generators hand the canonical edges, labels and features over from Rust without copying, so a generated `Graph` holds 16 bytes per edge; the PyG `edge_index` (32 more) is built only when asked for. JSON serialisation is opt-in through `plekton.to_json(graph, path=None)`.
 - **No fabricated values** — undefined or skipped metrics are `None`, never `0.0`, and JSON metadata records the reason in `metrics_skipped` (global transitivity, for instance, is skipped above 20,000 nodes).
