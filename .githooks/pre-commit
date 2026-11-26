@@ -16,9 +16,12 @@ if git status --porcelain | grep -q '^.[^ ]'; then
     refuse "unstaged changes remain outside the commit (see git status); stage or stash them first."
 fi
 
-# 2. Notice when cross-platform determinism goldens are modified.
-if git diff --cached --name-only -- crates/plekton-core/tests/determinism_golden.rs | grep -q .; then
-    echo "pre-commit: notice: determinism_golden.rs is modified — ensure any golden re-freeze is intentional and documented." >&2
+# 2. Notice when cross-platform determinism goldens are modified (generators and fit detectors).
+changed_goldens=$(git diff --cached --name-only -- \
+    crates/plekton-core/tests/determinism_golden.rs \
+    crates/plekton-fit/tests/determinism_golden.rs | tr '\n' ' ')
+if [ -n "$changed_goldens" ]; then
+    echo "pre-commit: notice: determinism golden modified (${changed_goldens% }) — ensure any golden re-freeze is intentional and documented." >&2
 fi
 
 # 3. Rust checks (plekton-python is a maturin cdylib, verified via cargo check).

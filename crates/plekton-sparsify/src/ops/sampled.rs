@@ -18,8 +18,9 @@ const WEIGHT_FLOOR: f64 = 1e-8;
 /// kept. Larger weights push the key toward `0` (its maximum), so high-scoring
 /// edges are favoured exactly in proportion to their weight.
 ///
-/// The `u_i` are drawn in edge order from a seeded [`ChaCha8Rng`], so the result
-/// is bit-identical across platforms and `rand` versions for a given `seed`.
+/// The `u_i` are drawn in edge order from a seeded [`ChaCha8Rng`], so the same
+/// `seed` reproduces the same selection. That is not promised across minor
+/// versions of `rand`, which may change sampled values.
 /// If `num_keep >= scores.len()` every edge is kept.
 pub fn select(scores: &[f64], num_keep: usize, seed: u64) -> Vec<bool> {
     let n_edges = scores.len();

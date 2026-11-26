@@ -15,7 +15,8 @@ readme      = "README.md"
 crate-type = ["rlib"]
 
 [dependencies]
-rand = { version = "0.8", features = ["small_rng"] }
+rand        = "0.8"
+rand_chacha = "0.3"
 
 [lints]
 workspace = true

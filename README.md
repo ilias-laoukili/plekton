@@ -175,7 +175,7 @@ train, val, test = plekton.splits.grouped_split(households, fracs=(0.64, 0.16, 0
 
 ## Guarantees and trade-offs
 
-- **Deterministic** — a fixed `seed` reproduces the same graph. Golden tests (`crates/plekton-core/tests/determinism_golden.rs`) pin the exact edges, labels and features of SBM, DC-SBM, BA and cSBM, and CI runs them on Linux and macOS.
+- **Deterministic** — a fixed `seed` reproduces the same graph or detection: generators and detectors draw from `ChaCha8Rng` (`rand_chacha`). Golden tests pin the exact edges, labels and features of SBM, DC-SBM, BA and cSBM (`crates/plekton-core/tests/determinism_golden.rs`) and the output of label propagation and SLPA (`crates/plekton-fit/tests/determinism_golden.rs`); CI runs them on Linux and macOS. What they do not cover is listed in [docs/models.md](docs/models.md#determinism).
 - **Lean** — `import plekton` needs only NumPy; `torch`, `torch_geometric` and `networkx` come with the optional extras `pyg`, `networkx` and `all`.
 - **Zero-copy** — generators hand NumPy arrays over from Rust without copying; JSON serialisation is opt-in through `plekton.to_json(edge_index, labels, x=None, path=None)`.
 - **No fabricated values** — undefined or skipped metrics are `None`, never `0.0`, and JSON metadata records the reason in `metrics_skipped` (global transitivity, for instance, is skipped above 20,000 nodes).

@@ -64,8 +64,10 @@ mypy
    - Run all non-trivial Rust work inside `py.allow_threads(|| ...)` so the GIL is released.
    - Keep `import plekton` strictly `numpy`-only; defer `torch`, `torch_geometric`, and `networkx` imports to their optional submodules.
 5. **Cross-platform seed determinism**:
-   - Core generators (`sbm`, `csbm`, `ba`, `mixing`) must stay deterministic for a given `seed`.
-   - `crates/plekton-core/tests/determinism_golden.rs` pins exact edges, labels, and features. Never alter RNG consumption order or sampling loops accidentally; intentional algorithmic revisions must explicitly re-freeze golden constants and document why.
+   - Core generators (`sbm`, `csbm`, `ba`, `mixing`) and the `plekton-fit` detectors (label propagation, SLPA) must stay deterministic for a given `seed`.
+   - Seeded randomness uses `rand_chacha::ChaCha8Rng` only (`plekton-core`'s `sampling::seeded_rng`, or `ChaCha8Rng::seed_from_u64`). Never `SmallRng`, `StdRng` or `thread_rng`: rand does not promise them to be reproducible across platforms or versions.
+   - `crates/plekton-core/tests/determinism_golden.rs` pins exact edges, labels, and features; `crates/plekton-fit/tests/determinism_golden.rs` pins label propagation and SLPA. Never alter RNG consumption order or sampling loops accidentally; intentional algorithmic revisions must explicitly re-freeze golden constants and document why.
+   - Not covered by the goldens: 32-bit targets (rand 0.8 samples `usize` ranges at pointer width) and minor-version upgrades of `rand` / `rand_distr`, which may change values and then require a deliberate re-freeze.
 6. **Honest metrics & pre-allocation budgets**:
    - Undefined or threshold-skipped metrics return `Option::None` (paired with `SkippedMetric`), never a fabricated `0.0`.
    - Quadratic structures (`plekton-fit`'s `K×K` matrix, `plekton-entity`'s windowed joins) must project memory before allocation and refuse above budget.

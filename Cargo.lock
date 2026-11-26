@@ -726,6 +726,7 @@ dependencies = [
  "plekton-fit",
  "plekton-metrics",
  "rand",
+ "rand_chacha",
  "rand_distr",
  "serde",
  "serde_json",
@@ -751,6 +752,7 @@ name = "plekton-fit"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "rand_chacha",
 ]
 
 [[package]]

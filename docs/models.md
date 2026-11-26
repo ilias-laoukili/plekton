@@ -34,6 +34,16 @@ Generates graphs that satisfy simultaneous homophily, heterophily, or full categ
 
 `plekton` pairs these generators with structural evaluation and reduction primitives: degree assortativity and honest structural metrics (`plekton-metrics`) [5], Spielman–Srivastava approximate effective-resistance sparsification (`plekton-sparsify`) [6], the shortest-path-preserving metric backbone (`plekton-sparsify`) [7], and Speaker–Listener Label Propagation (SLPA) for overlapping community detection (`plekton-fit`) [8].
 
+## Determinism
+
+Every generator (`sbm`, `csbm`, `ba`, `mixing`) and both `plekton-fit` detectors (label propagation, SLPA) draw from a single `rand_chacha::ChaCha8Rng` stream seeded with `seed_from_u64(seed)` and consumed in a fixed order; `seed=None` draws OS entropy instead and is not reproducible. The same seed therefore gives the same output. Golden tests pin it exactly — edges, labels and features of SBM, DC-SBM, BA and cSBM in `crates/plekton-core/tests/determinism_golden.rs`, label propagation and SLPA in `crates/plekton-fit/tests/determinism_golden.rs` — and CI runs them on Linux and macOS. `mixing_graph` is tested for same-seed reproducibility but has no golden.
+
+ChaCha8 replaced `SmallRng`, which rand does not promise to be reproducible across platforms or library versions. The goldens do not cover:
+
+- **32-bit targets.** Several draws sample a `usize` range, which rand 0.8 does at the platform's pointer width.
+- **Floating point on untested platforms.** Geometric skips, Pareto θ and Gaussian features evaluate transcendental functions, whose results rand notes "vary from platform to platform"; Windows is not in CI.
+- **Other minor versions of `rand` or `rand_distr`,** which may change sampled values. `Cargo.lock` pins the versions the goldens were frozen with.
+
 ## Ecosystem Positioning
 
 | Capability | `plekton` | `NetworkX` | `python-igraph` | `graph-tool` | `NetworKit` | `rustworkx` |

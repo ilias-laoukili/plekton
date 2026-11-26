@@ -22,8 +22,12 @@
 //!
 //! # Determinism
 //!
-//! Nothing here draws random numbers except label propagation, which takes a seed.
-//! [`fit`] is a pure function of its inputs.
+//! Nothing here draws random numbers except the two detectors, which take a seed:
+//! [`partition::detect_label_propagation`] and [`overlap::detect_overlapping`]
+//! draw from a `rand_chacha::ChaCha8Rng` built with `seed_from_u64(seed)`, so the
+//! same seed and the same edges give the same result, and
+//! `tests/determinism_golden.rs` pins both outputs. [`fit`] is a pure function of
+//! its inputs.
 
 pub mod overlap;
 pub mod partition;

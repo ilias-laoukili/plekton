@@ -40,8 +40,8 @@ pub enum Strategy {
     ///
     /// Unlike [`Strategy::Threshold`], every edge has a non-zero chance of being
     /// kept, so low-scoring bridge edges are not guaranteed to be cut. The
-    /// `seed` drives a `ChaCha8Rng` for cross-platform, cross-version
-    /// reproducibility (bit-identical on a laptop and in CI).
+    /// `seed` drives a `ChaCha8Rng`, so the same seed reproduces the same
+    /// selection (not promised across minor versions of `rand`).
     Sampled {
         /// Target fraction of edges to keep, in `(0, 1]`.
         retention_ratio: f64,

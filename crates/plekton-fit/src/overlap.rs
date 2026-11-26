@@ -14,12 +14,15 @@
 //! whose label makes up at least `threshold` of its memory. Communities of one
 //! node, duplicates and communities nested in a larger one are dropped.
 //!
-//! Determinism: memories are ordered maps and the visiting order comes from the
-//! seed, so the same seed and the same edges give the same communities.
+//! Determinism: memories are ordered maps and every draw — visiting order,
+//! spoken labels, ties — comes from one `ChaCha8Rng` seeded with `seed`, so the
+//! same seed and the same edges give the same communities (pinned by
+//! `tests/determinism_golden.rs`).
 
 use std::collections::BTreeMap;
 
-use rand::{rngs::SmallRng, seq::SliceRandom, Rng, SeedableRng};
+use rand::{seq::SliceRandom, Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
 /// Overlapping communities of a graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,7 +62,7 @@ pub fn detect_overlapping(
         .collect();
     let mut held: Vec<usize> = vec![1; n_nodes];
     let mut order: Vec<usize> = (0..n_nodes).collect();
-    let mut rng = SmallRng::seed_from_u64(seed);
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     for _ in 0..rounds {
         order.shuffle(&mut rng);
@@ -131,7 +134,7 @@ pub fn detect_overlapping(
 }
 
 /// One label drawn from a memory, in proportion to how often it is held.
-fn speak(memory: &BTreeMap<usize, usize>, held: usize, rng: &mut SmallRng) -> usize {
+fn speak(memory: &BTreeMap<usize, usize>, held: usize, rng: &mut ChaCha8Rng) -> usize {
     let mut pick = rng.gen_range(0..held.max(1));
     for (&label, &count) in memory {
         if pick < count {

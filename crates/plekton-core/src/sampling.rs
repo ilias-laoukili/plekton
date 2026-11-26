@@ -7,7 +7,8 @@
 
 use std::collections::BTreeMap;
 
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, Geometric, Pareto, Uniform};
 
 use crate::SynthGraphError;
@@ -72,7 +73,7 @@ struct DcSbmSampling<'a> {
 fn sample_intra_block(
     nodes: &[usize],
     sampling: &DcSbmSampling,
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
     edges: &mut Vec<(i64, i64)>,
 ) {
     let DcSbmSampling {
@@ -133,7 +134,7 @@ fn sample_inter_block(
     nodes_a: &[usize],
     nodes_b: &[usize],
     sampling: &DcSbmSampling,
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
     edges: &mut Vec<(i64, i64)>,
 ) {
     let DcSbmSampling {
@@ -216,10 +217,12 @@ pub fn build_bidirectional_edge_flat(canonical: &[(i64, i64)]) -> (Vec<i64>, usi
 // and share their incidental scaffolding (RNG construction, DC-SBM θ, the
 // block-pair sampling loop, effective-homophily) rather than re-implementing it.
 
-/// Builds the generator PRNG: a fixed `seed` for reproducible output, or
-/// OS entropy when `None`. Centralised so every backbone seeds identically —
-/// the load-bearing "same seed ⇒ identical graph" guarantee.
-pub fn seeded_rng(seed: Option<u64>) -> SmallRng {
+/// Builds the generator PRNG: a `ChaCha8Rng` from a fixed `seed`
+/// (`seed_from_u64`) for reproducible output, or from OS entropy when `None`.
+/// Centralised so every backbone seeds identically — the load-bearing "same seed
+/// ⇒ identical graph" guarantee. `ChaCha8Rng` rather than rand's `SmallRng`,
+/// which rand does not promise to be reproducible across platforms or versions.
+pub fn seeded_rng(seed: Option<u64>) -> ChaCha8Rng {
     seed.map_or_else(SeedableRng::from_entropy, SeedableRng::seed_from_u64)
 }
 
@@ -298,7 +301,7 @@ pub fn compute_dc_theta(
     n_nodes: usize,
     labels: &[usize],
     block_nodes: &[Vec<usize>],
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) -> Result<(Vec<f64>, Vec<f64>), SynthGraphError> {
     let n_communities = block_nodes.len();
     let raw: Vec<f64> = match correction {
@@ -426,7 +429,7 @@ pub fn sample_all_blocks(
     block_max_theta: &[f64],
     use_dc: bool,
     p_base_for: impl Fn(usize, usize) -> f64,
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
     edges: &mut Vec<(i64, i64)>,
 ) {
     let n_communities = block_nodes.len();

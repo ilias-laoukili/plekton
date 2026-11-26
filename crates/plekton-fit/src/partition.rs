@@ -9,7 +9,8 @@
 //! never defaulted here and never inferred from the absence of an argument: it
 //! is a value the caller constructs, and it says where it came from.
 
-use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
+use rand::{seq::SliceRandom, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
 /// A detection algorithm and the parameters it actually has.
 ///
@@ -118,9 +119,10 @@ pub fn compact(raw: &[usize]) -> Vec<usize> {
 /// thing that can be wrong in an interesting way, and a fit whose partition
 /// nobody trusts is a fit nobody can read.
 ///
-/// Determinism: the node visiting order is drawn once per round from `seed`, and
-/// ties between equally-frequent neighbour labels go to the smallest label id.
-/// Two runs with the same seed and the same edge list give the same partition.
+/// Determinism: the node visiting order is drawn once per round from a
+/// `ChaCha8Rng` seeded with `seed`, and ties between equally-frequent neighbour
+/// labels go to the smallest label id. Two runs with the same seed and the same
+/// edge list give the same partition (pinned by `tests/determinism_golden.rs`).
 ///
 /// Isolated nodes keep their own singleton label, which is the honest answer:
 /// nothing in the graph places them.
@@ -141,7 +143,7 @@ pub fn detect_label_propagation(
 
     let mut labels: Vec<usize> = (0..n_nodes).collect();
     let mut order: Vec<usize> = (0..n_nodes).collect();
-    let mut rng = SmallRng::seed_from_u64(seed);
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let mut rounds_used = 0;
     let mut converged = false;
 

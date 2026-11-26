@@ -46,7 +46,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use num_traits::ToPrimitive;
 use plekton_metrics::{mixing::attribute_mixing, transitivity::transitivity};
-use rand::{distributions::WeightedIndex, rngs::SmallRng, seq::SliceRandom, Rng};
+use rand::{distributions::WeightedIndex, seq::SliceRandom, Rng};
+use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, LogNormal, Normal};
 use serde::{Deserialize, Serialize};
 
@@ -297,7 +298,7 @@ fn undirected_ties(
     codes: &Codes<'_>,
     wanted: &[usize],
     groups: &[Option<usize>],
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) -> Result<Vec<(usize, usize)>, SynthGraphError> {
     let n = request.nodes;
     // Blocks: nodes sharing all their targeted categories.
@@ -466,7 +467,7 @@ fn group_ids(request: &MixingRequest) -> Vec<Option<usize>> {
 fn wanted_degrees(
     request: &MixingRequest,
     groups: &[Option<usize>],
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) -> Result<Vec<usize>, SynthGraphError> {
     let n = request.nodes;
     let mut sizes: HashMap<usize, usize> = HashMap::new();
@@ -662,7 +663,7 @@ fn place(
     block_of: &[usize],
     wanted: &[usize],
     groups: &[Option<usize>],
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) -> Vec<(usize, usize)> {
     let n_blocks = members.len();
     let budget = |i: usize, j: usize| {
@@ -796,7 +797,7 @@ fn close_triangles(
     nodes: usize,
     target: f64,
     labels: &[&[usize]],
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) -> Vec<(usize, usize)> {
     let mut ties: HashSet<(usize, usize)> = edges.iter().copied().collect();
     let mut adjacent = vec![Vec::new(); nodes];
@@ -977,7 +978,7 @@ fn directed_ties(
     codes: &Codes<'_>,
     wanted: &[usize],
     groups: &[Option<usize>],
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) -> Result<Vec<(usize, usize)>, SynthGraphError> {
     let n = request.nodes;
     let spread = LogNormal::new(0.0, request.popularity_spread)
@@ -1078,7 +1079,7 @@ fn tie_strengths(
     spec: &StrengthSpec,
     edges: &[(usize, usize)],
     codes: &Codes<'_>,
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) -> Result<Vec<f64>, SynthGraphError> {
     let noise = Normal::new(0.0, spec.spread)
         .map_err(|e| SynthGraphError::InvalidParameter(e.to_string()))?;

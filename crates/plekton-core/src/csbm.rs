@@ -4,7 +4,8 @@
 
 use std::collections::HashSet;
 
-use rand::{rngs::SmallRng, Rng};
+use rand::Rng;
+use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, Exp, Normal, Uniform};
 
 use crate::{
@@ -214,7 +215,7 @@ fn perturbed_class(
     true_class: usize,
     n_communities: usize,
     feat_noise_ratio: f64,
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) -> usize {
     if n_communities > 1 && feat_noise_ratio > 0.0 && rng.gen::<f64>() < feat_noise_ratio {
         let class_shift = rng.gen_range(1..n_communities);
@@ -231,9 +232,9 @@ fn fill_feature_rows(
     labels: &[usize],
     centroids: &[f64],
     chol: Option<&[f64]>,
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
     x_flat: &mut Vec<f32>,
-    mut sample_noise: impl FnMut(&mut SmallRng) -> f64,
+    mut sample_noise: impl FnMut(&mut ChaCha8Rng) -> f64,
 ) {
     let mut standard_normal_buffer = vec![0.0f64; config.feat_dim];
     let mut correlated_noise_buffer = vec![0.0f64; config.feat_dim];
@@ -263,7 +264,7 @@ fn generate_node_features(
     config: &CsbmConfig<'_>,
     dist_enum: &FeatDist,
     labels: &[usize],
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) -> Result<Vec<f32>, SynthGraphError> {
     let feat_dim = config.feat_dim;
     // Use caller-supplied centroids or generate `N(0, 1/√feat_dim)` defaults.
@@ -576,7 +577,7 @@ fn close_triangles(
     adj: &mut [Vec<usize>],
     edge_set: &mut HashSet<(usize, usize)>,
     p_triangle: f64,
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) {
     // Snapshot the pre-triangle edges in their canonical emission order, NOT
     // by iterating `edge_set` — a `HashSet` with a per-process-randomized
@@ -628,7 +629,7 @@ fn stitch_connectivity(
     adj: &mut [Vec<usize>],
     edge_set: &mut HashSet<(usize, usize)>,
     n_nodes: usize,
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) {
     let mut visited = vec![false; n_nodes];
     let mut main_component: Vec<usize> = Vec::new();
@@ -677,7 +678,7 @@ fn stitch_connectivity(
 fn sample_csbm_edges(
     config: &CsbmConfig<'_>,
     block_sizes: &[usize],
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) -> Result<SampledGraph, SynthGraphError> {
     let n_nodes = config.n_nodes;
     let n_communities = config.n_communities;
