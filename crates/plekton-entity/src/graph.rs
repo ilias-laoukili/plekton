@@ -45,8 +45,9 @@ pub struct Metrics {
     /// Largest component's size, in entities. A graph of 40 000 nodes in one component and
     /// one of 40 000 isolated pairs report the same component *count*; this tells them apart.
     pub largest_component: usize,
-    /// Edges over possible edges.
-    pub density: f64,
+    /// Edges over possible edges; `None` below two entities, where no pair can be
+    /// related.
+    pub density: Option<f64>,
     /// Global clustering coefficient, when defined.
     pub clustering_coefficient: Option<f64>,
     /// Triangle-based transitivity, or `None` when the graph is too large to count
@@ -268,6 +269,51 @@ fn attrs_conflict(a: &Attrs, b: &Attrs) -> bool {
         .any(|(key, value)| b.get(key).is_some_and(|other| other != value))
 }
 
+/// The metrics that the size of the graph alone leaves undefined or too costly, each
+/// with its reason: what `n` entities, `n_relations` relations and `n_kinds` kinds
+/// rule out before anything is measured.
+fn skipped_by_size(n: usize, n_relations: usize, n_kinds: usize) -> Vec<SkippedMetric> {
+    let mut skipped = Vec::new();
+    if n < 2 {
+        skipped.push(SkippedMetric::undefined(
+            "density",
+            "fewer than two entities, so no pair of them can be related",
+        ));
+    }
+    if n == 0 {
+        skipped.push(SkippedMetric::undefined(
+            "clustering_coefficient",
+            "there is no entity, so there is no mean to take",
+        ));
+    }
+    if n > plekton_metrics::clustering::CLUSTERING_THRESHOLD {
+        skipped.push(SkippedMetric::too_large(
+            "clustering_coefficient",
+            n,
+            plekton_metrics::clustering::CLUSTERING_THRESHOLD,
+        ));
+    }
+    if n > plekton_metrics::transitivity::TRANSITIVITY_THRESHOLD {
+        skipped.push(SkippedMetric::too_large(
+            "transitivity",
+            n,
+            plekton_metrics::transitivity::TRANSITIVITY_THRESHOLD,
+        ));
+    }
+    if n_kinds < 2 {
+        skipped.push(SkippedMetric::undefined(
+            "type_homophily",
+            "only one entity kind is present, so every relation is trivially intra-kind",
+        ));
+    } else if n_relations == 0 {
+        skipped.push(SkippedMetric::undefined(
+            "type_homophily",
+            "there are no relations to measure",
+        ));
+    }
+    skipped
+}
+
 /// Measure the graph. Every number here comes from `graph-metrics` or is a count.
 fn measure(entities: &[Entity], edges: &[(usize, usize)], top_hubs: usize) -> Metrics {
     let n = entities.len();
@@ -322,27 +368,7 @@ fn measure(entities: &[Entity], edges: &[(usize, usize)], top_hubs: usize) -> Me
 
     // Recorded so a reader can tell "not applicable" from "too big to compute" — both of
     // which otherwise arrive as a bare null.
-    let mut metrics_skipped = Vec::new();
-    if n > plekton_metrics::clustering::CLUSTERING_THRESHOLD {
-        metrics_skipped.push(SkippedMetric::too_large(
-            "clustering_coefficient",
-            n,
-            plekton_metrics::clustering::CLUSTERING_THRESHOLD,
-        ));
-    }
-    if n > plekton_metrics::transitivity::TRANSITIVITY_THRESHOLD {
-        metrics_skipped.push(SkippedMetric::too_large(
-            "transitivity",
-            n,
-            plekton_metrics::transitivity::TRANSITIVITY_THRESHOLD,
-        ));
-    }
-    if kind_index.len() < 2 {
-        metrics_skipped.push(SkippedMetric::undefined(
-            "type_homophily",
-            "only one entity kind is present, so every relation is trivially intra-kind",
-        ));
-    }
+    let mut metrics_skipped = skipped_by_size(n, edges.len(), kind_index.len());
 
     let transitivity = plekton_metrics::transitivity::transitivity(n, edges);
     if transitivity.is_none() && n <= plekton_metrics::transitivity::TRANSITIVITY_THRESHOLD {
@@ -370,11 +396,10 @@ fn measure(entities: &[Entity], edges: &[(usize, usize)], top_hubs: usize) -> Me
         ),
         transitivity,
         degree_assortativity,
-        // Only meaningful with something to be homophilous *against*: a single-kind graph
-        // would otherwise be reported as having no same-kind relations, the opposite of
-        // the truth. `compute_homophily` now returns `None` for an all-zero assignment
-        // itself, so this guard covers the one case it cannot see — a graph of one kind
-        // whose single kind index happens to be non-zero.
+        // Only meaningful with something to be homophilous *against*. `compute_homophily`
+        // measures any labelling, a single kind included, where every relation is
+        // trivially intra-kind and it says 1.0 — a degenerate measurement dressed as a
+        // finding. This guard is what keeps that case out.
         type_homophily: (kind_index.len() >= 2)
             .then(|| plekton_metrics::homophily::compute_homophily(edges, &assignment))
             .flatten(),
@@ -616,6 +641,35 @@ mod tests {
         assert_eq!(graph.metrics.n_entities, 0);
         assert_eq!(graph.metrics.connected_components, 0);
         assert_eq!(graph.metrics.largest_component, 0);
+        // Nothing to measure: no density and no mean clustering, each with its reason,
+        // rather than a made-up 0.0.
+        assert_eq!(graph.metrics.density, None);
+        assert_eq!(graph.metrics.clustering_coefficient, None);
+        let skipped: Vec<&str> = graph
+            .metrics
+            .metrics_skipped
+            .iter()
+            .map(|skipped| skipped.metric.as_str())
+            .collect();
+        assert!(skipped.contains(&"density"), "{skipped:?}");
+        assert!(skipped.contains(&"clustering_coefficient"), "{skipped:?}");
+    }
+
+    #[test]
+    fn two_kinds_without_relations_say_why_there_is_no_type_homophily() {
+        let extraction = Extraction {
+            entities: vec![Entity::new("h1", "host"), Entity::new("d1", "domain")],
+            ..Extraction::default()
+        };
+        let graph = build(extraction, DEFAULT_TOP_HUBS);
+        assert_eq!(graph.metrics.type_homophily, None);
+        assert!(graph
+            .metrics
+            .metrics_skipped
+            .iter()
+            .any(|skipped| skipped.metric == "type_homophily"));
+        // Two entities: a density exists, and it is 0.
+        assert_eq!(graph.metrics.density, Some(0.0));
     }
 
     #[test]

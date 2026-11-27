@@ -91,7 +91,7 @@ fn null_homophily_validates_and_reads_back_as_none() -> TestResult {
         "metrics_skipped".into(),
         serde_json::json!([{
             "metric": "homophily",
-            "reason": "undefined here: no node is labelled (every community is 0)"
+            "reason": "undefined here: no node carries a community attribute"
         }]),
     );
     check(&validator, &value, "graph with null homophily")?;
@@ -113,6 +113,56 @@ fn null_homophily_validates_and_reads_back_as_none() -> TestResult {
         !validator.is_valid(&missing),
         "homophily must stay required"
     );
+    Ok(())
+}
+
+/// Graphs whose metrics are undefined — no node, one node, no edge, no labels —
+/// still validate against the schema as it is: an undefined `homophily` is the
+/// `null` it already allows, `avg_degree_actual` and `density` are omitted (both
+/// optional), and none of them is ever written as a `null` the schema refuses.
+#[test]
+fn degenerate_graphs_validate_against_the_unchanged_schema() -> TestResult {
+    let validator = validator_for("schemas/graph.schema.json")?;
+    let edgeless = plekton::generate_sbm_core(5, 2, 0.0, 0.0, None, Some(1))?;
+    let cases = [
+        (
+            "no node",
+            plekton::arrays_to_graph_output(0, &[], Some(&[]), None)?,
+        ),
+        (
+            "one node",
+            plekton::arrays_to_graph_output(1, &[], Some(&[0]), None)?,
+        ),
+        ("no edge", plekton::sbm_result_to_graph_output(&edgeless)),
+        (
+            "no labels",
+            plekton::arrays_to_graph_output(3, &[(0, 1), (1, 2)], None, None)?,
+        ),
+    ];
+    for (what, graph) in cases {
+        let value = serde_json::to_value(&graph)?;
+        check(&validator, &value, what)?;
+        let metadata = value["metadata"]
+            .as_object()
+            .ok_or("metadata is not an object")?;
+        assert!(
+            metadata["homophily"].is_null(),
+            "{what}: homophily should be null"
+        );
+        for field in ["avg_degree_actual", "density", "n_components"] {
+            assert!(
+                metadata.get(field).is_none_or(|v| !v.is_null()),
+                "{what}: {field} must be a number or absent, never null"
+            );
+        }
+        let skipped: Vec<&str> = metadata["metrics_skipped"]
+            .as_array()
+            .ok_or("metrics_skipped is missing")?
+            .iter()
+            .filter_map(|entry| entry["metric"].as_str())
+            .collect();
+        assert!(skipped.contains(&"homophily"), "{what}: {skipped:?}");
+    }
     Ok(())
 }
 

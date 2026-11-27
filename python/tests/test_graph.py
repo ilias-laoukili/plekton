@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import pickle
 from typing import TYPE_CHECKING, Any
 
@@ -11,7 +12,7 @@ import numpy as np
 import pytest
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
 plekton = pytest.importorskip("plekton")
 Graph = plekton.Graph
@@ -320,6 +321,74 @@ def test_from_json_round_trips_and_refuses_misnumbered_nodes() -> None:
     }
     with pytest.raises(ValueError, match="position 0 has id 1"):
         Graph.from_json(document)
+
+
+# ── Undefined values: None with a reason, never a made-up number ─────────────
+
+
+def _skipped(metadata: Mapping[str, Any], metric: str) -> list[Any]:
+    """Return the ``metrics_skipped`` entries naming ``metric``."""
+    return [entry for entry in metadata.get("metrics_skipped", ()) if entry["metric"] == metric]
+
+
+@pytest.mark.parametrize(
+    "generate",
+    [
+        lambda: plekton.generate_sbm(10, 2, 0.0, 0.0, seed=0),
+        lambda: plekton.generate_sbm_from_fit(10, [5, 5], np.zeros((2, 2)), seed=0),
+        lambda: plekton.generate_csbm(10, 2, 0.7, 0.0, 3, 1.0, seed=0),
+    ],
+)
+def test_a_graph_drawn_without_edges_has_no_homophily(generate: Callable[[], Graph]) -> None:
+    """No edge: ``homophily`` is ``None`` with the same reason the JSON writer records."""
+    graph = generate()
+    assert graph.n_edges == 0
+    assert graph.metadata["homophily"] is None
+    written = json.loads(plekton.to_json(graph))["metadata"]
+    assert written["homophily"] is None
+    assert _skipped(graph.metadata, "homophily") == _skipped(written, "homophily")
+    assert _skipped(written, "homophily") == [
+        {"metric": "homophily", "reason": "undefined here: the graph has no edges"},
+    ]
+
+
+def test_a_single_community_has_homophily_one_everywhere() -> None:
+    """One block: the generator, its JSON and the metric API all say 1.0."""
+    graph = plekton.generate_sbm(30, 1, 0.3, 0.0, seed=1)
+    assert graph.n_edges > 0
+    assert graph.metadata["homophily"] == 1.0
+    assert "metrics_skipped" not in graph.metadata
+    assert plekton.metrics.homophily(graph) == 1.0
+    assert json.loads(plekton.to_json(graph))["metadata"]["homophily"] == 1.0
+
+
+def test_to_json_without_labels_writes_no_homophily() -> None:
+    """Without labels, every node goes in community 0 and no homophily is reported."""
+    # Community 0 is written because the field is required; measuring it would invent.
+    written = json.loads(plekton.to_json(Graph(EDGES, n_nodes=4)))
+    assert {node["community"] for node in written["nodes"]} == {0}
+    assert written["metadata"]["homophily"] is None
+    assert _skipped(written["metadata"], "homophily") == [
+        {
+            "metric": "homophily",
+            "reason": (
+                "undefined here: the graph carries no labels; every node is written in community 0"
+            ),
+        },
+    ]
+
+
+def test_from_json_does_not_invent_missing_metrics() -> None:
+    """A document without ``avg_degree_actual`` or ``n_components`` reads without them, not 0."""
+    document = {
+        "metadata": {"schema": "plekton.graph/v1", "n_nodes": 2, "n_edges": 1, "homophily": None},
+        "nodes": [{"id": 0, "community": 0}, {"id": 1, "community": 0}],
+        "edges": [{"source": 0, "target": 1}],
+    }
+    metadata = Graph.from_json(document).metadata
+    assert "avg_degree_actual" not in metadata
+    assert "n_components" not in metadata
+    assert "density" not in metadata
 
 
 def test_to_hetero_data_refuses_a_graph() -> None:

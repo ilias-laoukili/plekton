@@ -7,7 +7,7 @@ repository.workspace = true
 authors.workspace = true
 description = "Principled graph edge-sparsification strategies: approximate effective resistance (Spielman–Srivastava), metric backbone, threshold, degree-aware, and weighted sampling."
 license.workspace = true
-keywords    = ["graph", "sparsification", "spectral", "gnn", "backbone"]
+keywords    = ["graph", "sparsification", "effective-resistance", "gnn", "backbone"]
 categories  = ["algorithms", "science"]
 readme      = "README.md"
 

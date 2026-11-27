@@ -26,8 +26,10 @@ pub const CLUSTERING_THRESHOLD: usize = 10_000;
 /// nodes with degree 0 or 1 contribute `0.0` to the sum.
 ///
 /// Returns `None` when `n_nodes > CLUSTERING_THRESHOLD` (the adjacency
-/// intersection is `O(E · max_degree)` and becomes prohibitive for large graphs).
-/// Returns `Some(0.0)` for edgeless or empty graphs.
+/// intersection is `O(E · max_degree)` and becomes prohibitive for large graphs),
+/// and `None` for a graph with no node, where the mean would be over nothing.
+/// An edgeless graph with at least one node gives `Some(0.0)`: every node has
+/// degree below 2 and contributes `0.0`, as above.
 ///
 /// # Arguments
 /// * `n_nodes` – Total number of nodes.
@@ -42,13 +44,17 @@ pub const CLUSTERING_THRESHOLD: usize = 10_000;
 ///     compute_clustering_coefficient(3, &[(0, 1), (0, 2), (1, 2)]),
 ///     Some(1.0),
 /// );
+///
+/// // No node: no mean to take. Nodes without edges: each counts 0.
+/// assert_eq!(compute_clustering_coefficient(0, &[]), None);
+/// assert_eq!(compute_clustering_coefficient(5, &[]), Some(0.0));
 /// ```
 #[must_use]
 pub fn compute_clustering_coefficient(n_nodes: usize, edges: &[(usize, usize)]) -> Option<f64> {
-    if n_nodes > CLUSTERING_THRESHOLD {
+    if n_nodes > CLUSTERING_THRESHOLD || n_nodes == 0 {
         return None;
     }
-    if n_nodes == 0 || edges.is_empty() {
+    if edges.is_empty() {
         return Some(0.0);
     }
 

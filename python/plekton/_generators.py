@@ -6,6 +6,8 @@ The Rust engine hands over the canonical ``(E, 2)`` edges, the labels and, for
 the cSBM, the features without copying. ``Graph.metadata`` records the measured
 ``homophily`` and the ``seed`` that produced the graph: when ``seed`` is
 ``None`` one is drawn, used and recorded, so every graph can be regenerated.
+A graph drawn without any edge has no homophily: ``metadata["homophily"]`` is
+then ``None``, and ``metadata["metrics_skipped"]`` says why, as in the JSON.
 """
 
 from __future__ import annotations
@@ -24,6 +26,17 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     import numpy.typing as npt
 
 __all__ = ["generate_ba", "generate_csbm", "generate_sbm", "generate_sbm_from_fit"]
+
+# The reason the Rust JSON writer records for a graph without edges, word for word.
+HOMOPHILY_WITHOUT_EDGES = "undefined here: the graph has no edges"
+
+
+def _metadata(homophily: float | None, seed: int) -> dict[str, object]:
+    """``{"homophily", "seed"}``, plus ``metrics_skipped`` when the homophily is undefined."""
+    metadata: dict[str, object] = {"homophily": homophily, "seed": seed}
+    if homophily is None:
+        metadata["metrics_skipped"] = [{"metric": "homophily", "reason": HOMOPHILY_WITHOUT_EDGES}]
+    return metadata
 
 
 def generate_sbm(
@@ -55,7 +68,7 @@ def generate_sbm(
         edges,
         n_nodes,
         labels=labels,
-        metadata={"homophily": homophily, "seed": used},
+        metadata=_metadata(homophily, used),
     )
 
 
@@ -86,7 +99,7 @@ def generate_sbm_from_fit(
         edges,
         n_nodes,
         labels=labels,
-        metadata={"homophily": homophily, "seed": used},
+        metadata=_metadata(homophily, used),
     )
 
 
@@ -110,7 +123,7 @@ def generate_ba(
         edges,
         n_nodes,
         labels=labels,
-        metadata={"homophily": homophily, "seed": used},
+        metadata=_metadata(homophily, used),
     )
 
 
@@ -168,5 +181,5 @@ def generate_csbm(  # noqa: PLR0913 - the cSBM keyword surface, one argument per
         n_nodes,
         labels=labels,
         x=x,
-        metadata={"homophily": effective_h, "seed": used},
+        metadata=_metadata(effective_h, used),
     )

@@ -20,7 +20,7 @@ algorithms.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -101,7 +101,7 @@ def select_mask(  # noqa: PLR0913 - the graph, the score, and the selection poli
     keep_lowest: bool = False,
     min_per_node: int = 1,
     seed: int | None = None,
-    preserve_connectivity: bool = True,
+    guard: Literal["none", "isolates"] = "isolates",
     n_nodes: int | None = None,
 ) -> np.ndarray:
     """Select edges under ``strategy``; return a ``bool[E]`` keep-mask.
@@ -110,8 +110,25 @@ def select_mask(  # noqa: PLR0913 - the graph, the score, and the selection poli
     ``scores`` are per-edge weights (from :func:`similarity_scores` or
     :func:`approx_effective_resistance`). Per-strategy parameters: ``keep_lowest``
     (threshold), ``min_per_node`` (degree_aware), ``seed`` (sampled; ``None``
-    draws one). When ``preserve_connectivity`` is ``True`` no originally-connected
-    node is isolated. Apply the mask with ``graph.edge_subgraph(mask)``.
+    draws one).
+
+    ``"sampled"`` draws edges without replacement, favouring high scores: an
+    edge's chance of being kept grows with its score but is not proportional to
+    it. The kept edges are not reweighted, so sampling by
+    :func:`approx_effective_resistance` carries no spectral guarantee. Sampling
+    reads its own random stream, so the seed given to
+    :func:`approx_effective_resistance` can be reused here without reusing its
+    draws.
+
+    ``guard`` repairs the selection afterwards. With ``"isolates"`` (the default),
+    every node that had an edge gets its highest-scoring one back if the selection
+    dropped them all, so no node is left isolated; ``"none"`` keeps the selection
+    as it is. The guard does not keep the graph connected: the kept edges can
+    still split it into several components. The edges it restores come on top of
+    the strategy's target, so the mask can keep more edges than
+    ``retention_ratio`` asks for (20 instead of 19 on a 40-node path at ``0.5``);
+    to compare methods at an equal edge budget, use ``guard="none"`` or count
+    ``mask.sum()``. Apply the mask with ``graph.edge_subgraph(mask)``.
     """
     g = as_graph(graph, n_nodes, caller="sparsify.select_mask")
     return np.asarray(
@@ -124,7 +141,7 @@ def select_mask(  # noqa: PLR0913 - the graph, the score, and the selection poli
             keep_lowest,
             min_per_node,
             resolve_seed(seed),
-            preserve_connectivity,
+            guard,
         ),
     )
 

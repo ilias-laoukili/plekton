@@ -86,7 +86,7 @@ fn sbm_plain_golden() -> Result<(), Box<dyn std::error::Error>> {
         "SBM plain edges drifted"
     );
     assert_eq!(r.labels, SBM_PLAIN_LABELS, "SBM plain labels drifted");
-    assert!((r.effective_h - 11.0 / 14.0).abs() < 1e-12);
+    assert!((r.effective_h.ok_or("no edge, so no homophily")? - 11.0 / 14.0).abs() < 1e-12);
 
     // Same seed twice ⇒ byte-identical.
     let r2 = generate_sbm_core(12, 3, 0.5, 0.1, None, Some(42))?;
@@ -133,7 +133,7 @@ fn sbm_dc_golden() -> Result<(), Box<dyn std::error::Error>> {
     let r = generate_sbm_core(16, 4, 0.6, 0.1, Some(3.0), Some(7))?;
     assert_eq!(r.canonical_edges, SBM_DC_EDGES, "DC-SBM edges drifted");
     assert_eq!(r.labels, SBM_DC_LABELS, "DC-SBM labels drifted");
-    assert!((r.effective_h - 15.0 / 25.0).abs() < 1e-12);
+    assert!((r.effective_h.ok_or("no edge, so no homophily")? - 15.0 / 25.0).abs() < 1e-12);
     Ok(())
 }
 
@@ -247,7 +247,7 @@ fn csbm_gaussian_p_triangle_zero_golden() -> Result<(), Box<dyn std::error::Erro
     );
     assert_eq!(r.labels, CSBM_GAUSS_LABELS, "cSBM gaussian labels drifted");
     assert_feats_close(&r.x_flat, CSBM_GAUSS_XFLAT);
-    assert!((r.effective_h - 13.0 / 18.0).abs() < 1e-12);
+    assert!((r.effective_h.ok_or("no edge, so no homophily")? - 13.0 / 18.0).abs() < 1e-12);
     Ok(())
 }
 
@@ -335,7 +335,7 @@ fn csbm_dc_p_triangle_zero_golden() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(r.canonical_edges, CSBM_DC_EDGES, "cSBM DC edges drifted");
     assert_eq!(r.labels, CSBM_DC_LABELS, "cSBM DC labels drifted");
     assert_feats_close(&r.x_flat, CSBM_DC_XFLAT);
-    assert!((r.effective_h - 13.0 / 22.0).abs() < 1e-12);
+    assert!((r.effective_h.ok_or("no edge, so no homophily")? - 13.0 / 22.0).abs() < 1e-12);
     Ok(())
 }
 

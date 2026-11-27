@@ -25,7 +25,7 @@
 //!    `d_G` is the shortest-path distance (Dijkstra from each source).
 //!
 //! Complexity is `O(n · (m log n))` time — fast on moderate-sized graphs and
-//! subgraphs, heavier on very large graphs (where spectral sampling is faster).
+//! subgraphs, heavy on very large ones.
 
 use std::{cmp::Ordering, collections::BinaryHeap};
 

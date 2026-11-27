@@ -29,8 +29,12 @@ import networkx as nx
 import numpy as np
 
 import plekton as _rs
+from plekton._generators import HOMOPHILY_WITHOUT_EDGES
 from plekton._graph import Graph
 from plekton._graph_io import GraphInput, coerce_graph_json
+
+# The reason the Rust JSON writer records for a graph without nodes, word for word.
+_NO_NODE_TO_AVERAGE = "undefined here: the graph has no nodes, so there is no mean to take"
 
 
 def to_networkx(
@@ -82,17 +86,25 @@ def to_networkx(
 def _edge_homophily(
     canonical_edges: list[tuple[int, int]],
     communities: dict[int, int],
+    n_unlabelled: int,
 ) -> tuple[float | None, str | None]:
     """Edge homophily, or ``None`` and the reason it is undefined.
 
-    Same rule as :func:`plekton.metrics.homophily`: undefined without edges, and
-    undefined when every node is in community ``0`` — the converter's default for a
-    node without a ``community`` attribute, so nothing was labelled.
+    Same rule as :func:`plekton.metrics.homophily` — defined as soon as there are
+    edges and labels, a single community included — with the labels read from the
+    ``community`` attribute. A node without one has no label: the converter writes
+    it in community ``0`` only because the field is required, so measuring that
+    stand-in would invent a value. ``n_unlabelled`` counts such nodes.
     """
+    n_nodes = len(communities)
+    if n_unlabelled > 0:
+        if n_unlabelled == n_nodes:
+            return None, "undefined here: no node carries a community attribute"
+        return None, (
+            f"undefined here: {n_unlabelled} of {n_nodes} nodes carry no community attribute"
+        )
     if not canonical_edges:
-        return None, "undefined here: the graph has no edges"
-    if not any(community != 0 for community in communities.values()):
-        return None, "undefined here: no node is labelled (every community is 0)"
+        return None, HOMOPHILY_WITHOUT_EDGES
     n_matching = sum(1 for src, dst in canonical_edges if communities[src] == communities[dst])
     return n_matching / len(canonical_edges), None
 
@@ -129,8 +141,11 @@ def networkx_to_json(graph: nx.Graph) -> str:
 
     ``n_components`` counts connected components (weakly connected ones for a
     directed graph). ``homophily`` is the fraction of edges whose endpoints share a
-    ``community``; it is ``None`` (JSON ``null``), with a ``metrics_skipped`` entry
-    giving the reason, when the graph has no edges or no node is labelled.
+    ``community``, a single community included (``1.0``). It is ``None`` (JSON
+    ``null``), with a ``metrics_skipped`` entry giving the reason, when the graph
+    has no edges or when a node carries no ``community`` attribute: such a node is
+    written in community ``0`` because the field is required, but it has no label.
+    ``avg_degree_actual`` is omitted, with its reason, for a graph without nodes.
     """
     ordered = sorted(
         ((_original_id(node), node) for node in graph.nodes()),
@@ -143,9 +158,15 @@ def networkx_to_json(graph: nx.Graph) -> str:
 
     nodes = []
     communities: dict[int, int] = {}
+    n_unlabelled = 0
     for index, (original_id, node) in enumerate(ordered):
         attrs = graph.nodes[node]
-        community = int(attrs.get("community", 0))
+        if "community" in attrs:
+            community = int(attrs["community"])
+        else:
+            # The field is required, so the node is written in community 0, unlabelled.
+            community = 0
+            n_unlabelled += 1
         communities[index] = community
         record: dict[str, object] = {"id": index}
         if renumbered:
@@ -165,25 +186,29 @@ def networkx_to_json(graph: nx.Graph) -> str:
     )
     n_edges = len(canonical_edges)
 
-    homophily, homophily_skipped = _edge_homophily(canonical_edges, communities)
+    homophily, homophily_skipped = _edge_homophily(canonical_edges, communities, n_unlabelled)
     n_components = (
         nx.number_weakly_connected_components(graph)
         if graph.is_directed()
         else nx.number_connected_components(graph)
     )
 
-    avg_degree = 2.0 * n_edges / n_nodes if n_nodes > 0 else 0.0
-
     metadata: dict[str, Any] = {
         "schema": "plekton.graph/v1",
         "n_nodes": n_nodes,
         "n_edges": n_edges,
         "homophily": homophily,
-        "avg_degree_actual": avg_degree,
-        "n_components": int(n_components),
     }
+    skipped: list[dict[str, str]] = []
     if homophily_skipped is not None:
-        metadata["metrics_skipped"] = [{"metric": "homophily", "reason": homophily_skipped}]
+        skipped.append({"metric": "homophily", "reason": homophily_skipped})
+    if n_nodes > 0:
+        metadata["avg_degree_actual"] = 2.0 * n_edges / n_nodes
+    else:
+        skipped.append({"metric": "avg_degree_actual", "reason": _NO_NODE_TO_AVERAGE})
+    metadata["n_components"] = int(n_components)
+    if skipped:
+        metadata["metrics_skipped"] = skipped
     schema = graph.graph.get("feature_schema")
     if schema is not None:
         metadata["feature_schema"] = schema

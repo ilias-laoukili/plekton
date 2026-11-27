@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ilias Laoukili
-//! Sparsification strategy and edge-scoring metric parameter types.
+//! Sparsification strategy, guard and edge-scoring metric parameter types.
 
 /// The edge-selection policy applied by [`crate::sparsify`].
 ///
@@ -35,13 +35,18 @@ pub enum Strategy {
         min_per_node: usize,
     },
 
-    /// Weighted sampling **without replacement**, with selection probability
-    /// proportional to edge score (Efraimidis-Spirakis keys).
+    /// Weighted sampling **without replacement** (Efraimidis-Spirakis keys): like
+    /// successive draws that each pick a remaining edge with probability
+    /// proportional to its score. An edge's chance of being kept grows with its
+    /// score but is not proportional to it; it saturates towards 1 for heavy
+    /// edges.
     ///
     /// Unlike [`Strategy::Threshold`], every edge has a non-zero chance of being
     /// kept, so low-scoring bridge edges are not guaranteed to be cut. The
-    /// `seed` drives a `ChaCha8Rng`, so the same seed reproduces the same
-    /// selection (not promised across minor versions of `rand`).
+    /// `seed` drives stream 1 of `ChaCha8Rng::seed_from_u64(seed)` — not stream
+    /// 0, which the effective-resistance projection reads — so the same seed
+    /// reproduces the same selection (not promised across minor versions of
+    /// `rand`).
     Sampled {
         /// Target fraction of edges to keep, in `(0, 1]`.
         retention_ratio: f64,
@@ -66,6 +71,31 @@ impl Strategy {
             } => retention_ratio,
         }
     }
+}
+
+/// What [`crate::sparsify`] repairs once the [`Strategy`] has chosen its edges.
+///
+/// Non-exhaustive so that further guards can be added without breaking callers
+/// that match on it.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Guard {
+    /// Keep the selection exactly as the strategy made it.
+    Off,
+    /// No node loses its last edge: a node that had at least one edge in the
+    /// input but none in the selection gets its highest-scoring incident edge
+    /// back, as GNNs that divide by node degree need.
+    ///
+    /// This is **not** a connectivity guarantee. Every node keeps an edge, yet
+    /// the kept edges can still split a connected graph into many components: a
+    /// 40-node path whose threshold keeps every other edge comes out as 20
+    /// disjoint pairs.
+    ///
+    /// The restored edges come on top of the strategy's target, so the result
+    /// can hold more edges than `retention_ratio` asks for — 20 instead of
+    /// ⌊39 · 0.5⌋ = 19 on that path. Compare methods at an equal edge budget
+    /// with [`Guard::Off`], or count the edges actually kept.
+    Isolates,
 }
 
 /// A structural (or feature) edge-scoring metric, dispatched to

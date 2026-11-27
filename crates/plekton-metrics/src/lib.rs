@@ -36,10 +36,30 @@ pub mod similarity;
 pub mod skipped;
 pub mod transitivity;
 
-/// Lossless `usize` count -> `f64` (graph node/edge counts never approach 2^32),
-/// used instead of a precision-losing `as` cast throughout the metric formulas.
+/// `usize` count -> `f64`, exact for every count below 2^53.
+///
+/// It used to go through `u32` and saturate at `u32::MAX`, so any count from
+/// 2^32 up came out wrong; `f64` holds every integer up to 2^53 exactly, far
+/// beyond any node or edge count.
 #[inline]
 #[must_use]
-pub(crate) fn count_to_f64(n: usize) -> f64 {
-    f64::from(u32::try_from(n).unwrap_or(u32::MAX))
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "exact below 2^53, which no node or edge count gets near"
+)]
+pub(crate) const fn count_to_f64(n: usize) -> f64 {
+    n as f64
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn counts_above_u32_max_stay_exact() {
+        let count: usize = (1 << 32) + 1;
+        assert_eq!(
+            super::count_to_f64(count).to_bits(),
+            4_294_967_297.0_f64.to_bits()
+        );
+    }
 }

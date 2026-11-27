@@ -79,7 +79,7 @@ fn components<'py>(
 }
 
 #[pyfunction]
-fn density(n_nodes: usize, n_edges: usize) -> f64 {
+fn density(n_nodes: usize, n_edges: usize) -> Option<f64> {
     graph_density(n_nodes, n_edges)
 }
 

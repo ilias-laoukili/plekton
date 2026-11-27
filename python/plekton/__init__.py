@@ -14,7 +14,8 @@ plus optional labels, features, per-edge attributes and metadata. It exposes:
   ``generate_from_config`` and ``generate_mixing_graph_json``.
 - Blockmodel estimation & community detection: ``plekton.fit``.
 - Structural graph metrics: ``plekton.metrics``.
-- Edge scoring & spectral/backbone sparsification: ``plekton.sparsify``.
+- Edge scoring (similarities, approximate effective resistance) and score-based or
+  metric-backbone sparsification: ``plekton.sparsify``.
 - Leakage-free group & temporal ML splitters: ``plekton.splits``.
 
 Every randomised function takes ``seed=None`` by default, which draws a seed; the
@@ -58,8 +59,10 @@ def to_json(
 ) -> str:
     """Serialise a :class:`Graph` into canonical ``plekton.graph/v1`` JSON.
 
-    When *path* is given, the document is also written to that file. Nodes
-    without ``labels`` are written in community ``0``.
+    When *path* is given, the document is also written to that file. A graph
+    without ``labels`` has every node written in community ``0``, since the field
+    is required, and its ``homophily`` is ``null``, with the reason in
+    ``metrics_skipped``: there is no labelling to measure.
 
     ``plekton.graph/v1`` is undirected and has no field for edge attributes, so
     nothing is dropped silently: a directed graph raises, and so does a graph
@@ -85,13 +88,10 @@ def to_json(
             "drop_edge_attrs=True to write the graph without them"
         )
         raise ValueError(msg)
-    labels = graph.labels
-    if labels is None:
-        labels = np.zeros(graph.n_nodes, dtype=np.int64)
     x = None if graph.x is None else np.ascontiguousarray(graph.x, dtype=np.float32)
     out_path = None if path is None else str(path)
     # `edges.T` is a (2, E) view: the extension reads it without a copy.
-    return str(_graph_to_json(graph.edges.T, labels, x, out_path))
+    return str(_graph_to_json(graph.edges.T, graph.n_nodes, graph.labels, x, out_path))
 
 
 __all__ = [

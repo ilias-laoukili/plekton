@@ -4,8 +4,14 @@
 
 Generates graphs over a cross-product of parameter values by calling
 the compiled Rust engine in a loop. Every graph gets an explicit seed, recorded
-in its entry's ``config["seed"]``: derived from ``base_seed`` when one is given,
-drawn otherwise, so any graph of a sweep can be regenerated.
+in its entry's ``config["seed"]``, so any graph of a sweep can be regenerated.
+
+With a base seed — ``base_seed``, or else the ``"seed"`` of ``base`` — each
+graph's seed is derived from that base seed, the graph's own configuration
+(without its seed) and its replica number, through SHA-256 (see
+:func:`plekton._seed.derive_seed`). Adding a value to the grid therefore leaves
+the seed, and the graph, of every other entry unchanged, and the same entry gets
+the same seed in every process. Without a base seed, each graph draws a fresh one.
 
 Streaming output
 ----------------
@@ -44,15 +50,24 @@ from pathlib import Path
 from typing import Any
 
 import plekton as _rs
-from plekton._seed import resolve_seed
+from plekton._seed import derive_seed, resolve_seed
 
 
-def _assign_seed(config: dict[str, Any], base_seed: int | None, index: int) -> None:
-    """Give ``config`` the explicit seed it will run with, so the entry records it."""
-    if base_seed is not None:
-        config["seed"] = base_seed + index
-    elif config.get("seed") is None:
-        config["seed"] = resolve_seed(None)
+def _base_seed(base: dict[str, Any], base_seed: int | None) -> int | None:
+    """Return the seed every graph's seed derives from, or ``None`` to draw each one.
+
+    ``base_seed`` comes first; when it is ``None`` the ``"seed"`` of ``base`` stands
+    in for it, so a seeded base config gives distinct, reproducible replicas rather
+    than copies of a single graph. Both given and different is ambiguous: refused.
+    """
+    in_base = base.get("seed")
+    if base_seed is None:
+        return None if in_base is None else resolve_seed(in_base)
+    chosen = resolve_seed(base_seed)
+    if in_base is not None and resolve_seed(in_base) != chosen:
+        msg = f"base_seed={chosen} contradicts base['seed']={in_base!r}; give only one of them"
+        raise ValueError(msg)
+    return chosen
 
 
 def sweep(
@@ -77,10 +92,11 @@ def sweep(
         Number of graphs to generate for each parameter combination
         (useful for averaging over random seeds).
     base_seed:
-        If provided, each graph receives a deterministic seed derived as
-        ``base_seed + result_index``, ensuring full reproducibility. If ``None``,
-        a graph whose config carries no ``"seed"`` gets a freshly drawn one. Either
-        way the seed that ran is in the entry's ``config["seed"]``.
+        The seed every graph's seed derives from, together with the graph's
+        configuration (without its seed) and its replica number — see the module
+        docstring. ``None`` uses the ``"seed"`` of ``base`` instead when it has one,
+        and otherwise draws a fresh seed for every graph. Either way the seed that
+        ran is in the entry's ``config["seed"]``.
     output_path:
         Optional path to write results to disk.
 
@@ -103,7 +119,9 @@ def sweep(
     Raises
     ------
     ValueError
-        If ``count_per_config < 1``.
+        If ``count_per_config < 1``, if ``base_seed`` and the ``"seed"`` of
+        ``base`` are both given and differ, or if a seeded configuration holds a
+        NaN or an infinity, which has no JSON form to derive a seed from.
 
     Examples
     --------
@@ -123,6 +141,7 @@ def sweep(
     if count_per_config < 1:
         msg = "count_per_config must be >= 1"
         raise ValueError(msg)
+    root = _base_seed(base, base_seed)
 
     keys = sorted(sweep_params.keys())
     combos = list(itertools.product(*[sweep_params[key] for key in keys]))
@@ -145,12 +164,14 @@ def sweep(
                 _out_path.open("w", encoding="utf-8", newline="\n"),
             )
         for combo in combos:
-            for _ in range(count_per_config):
+            for replica in range(count_per_config):
                 config = json.loads(json.dumps(base))
                 config.setdefault("parameters", {})
                 for k, v in zip(keys, combo, strict=True):
                     config["parameters"][k] = v
-                _assign_seed(config, base_seed, len(results))
+                config["seed"] = (
+                    resolve_seed(None) if root is None else derive_seed(root, config, replica)
+                )
 
                 graph_json = _rs.generate_from_config(json.dumps(config))
                 entry = {"config": config, "graph": json.loads(graph_json)}

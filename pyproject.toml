@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "plekton"
 version = "0.1.0"
-description = "High-performance synthetic graph generation (SBM, O(E) DC-SBM, cSBM, BA, multi-attribute mixing), blockmodel fitting, structural metrics, and spectral sparsification in Rust with zero-copy Python bindings."
+description = "Fast synthetic graph generation and sparsification in Rust, with Python bindings."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Ilias Laoukili" }]

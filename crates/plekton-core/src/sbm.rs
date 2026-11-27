@@ -3,9 +3,7 @@
 //! SBM / DC-SBM (Stochastic Block Model / Degree-Corrected SBM) backbone generator.
 
 use crate::{
-    sampling::{
-        compute_dc_theta, effective_homophily, sample_all_blocks, seeded_rng, DegreeCorrection,
-    },
+    sampling::{compute_dc_theta, edge_homophily, sample_all_blocks, seeded_rng, DegreeCorrection},
     types::SbmCoreResult,
     SynthGraphError,
 };
@@ -284,7 +282,7 @@ pub fn generate_sbm_from_fit(
         &mut edges,
     );
 
-    let effective_h = effective_homophily(&edges, &labels);
+    let effective_h = edge_homophily(&edges, &labels)?;
 
     Ok(SbmCoreResult {
         canonical_edges: edges,

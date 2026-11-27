@@ -16,8 +16,13 @@ import plekton
 import pytest
 from plekton import sparsify
 
-# The pendant node connectivity preservation must keep attached.
+# The pendant node the isolates guard must keep attached.
 _PENDANT_NODE = 3
+
+# A 40-node path: what the isolates guard leaves of it shows that it is no connectivity
+# guarantee.
+_PATH_NODES = 40
+_PATH_PAIRS = _PATH_NODES // 2
 
 # A triangle plus a pendant: enough structure for every metric to say something different,
 # small enough to reason about by hand.
@@ -76,20 +81,61 @@ def test_select_mask_is_boolean_and_edge_aligned() -> None:
     assert sparse.n_edges == int(keep.sum())
 
 
-def test_connectivity_preservation_leaves_no_node_stranded() -> None:
-    """Connectivity preservation leaves no node stranded."""
+def test_the_isolates_guard_leaves_no_node_stranded() -> None:
+    """The isolates guard, on by default, leaves no node stranded."""
     scores = sparsify.similarity_scores(GRAPH, "jaccard")
-    keep = sparsify.select_mask(
-        GRAPH,
-        scores,
-        "threshold",
-        retention_ratio=0.25,
-        preserve_connectivity=True,
-    )
+    for keep in (
+        sparsify.select_mask(GRAPH, scores, "threshold", retention_ratio=0.25, guard="isolates"),
+        sparsify.select_mask(GRAPH, scores, "threshold", retention_ratio=0.25),
+    ):
+        # Node 3 hangs off the lowest-scoring edge, so an unguarded threshold would isolate it.
+        survivors = set(GRAPH.edges[keep].flatten().tolist())
+        assert _PENDANT_NODE in survivors, "the isolates guard must keep the pendant attached"
 
-    # Node 3 hangs off the lowest-scoring edge, so an unguarded threshold would isolate it.
-    survivors = set(GRAPH.edges[keep].flatten().tolist())
-    assert _PENDANT_NODE in survivors, "preserve_connectivity must keep the pendant attached"
+
+def test_without_the_guard_the_pendant_node_is_isolated() -> None:
+    """With ``guard="none"`` the selection is kept as the threshold made it."""
+    scores = sparsify.similarity_scores(GRAPH, "jaccard")
+    keep = sparsify.select_mask(GRAPH, scores, "threshold", retention_ratio=0.25, guard="none")
+    assert _PENDANT_NODE not in set(GRAPH.edges[keep].flatten().tolist())
+
+
+def test_the_isolates_guard_does_not_keep_a_path_connected() -> None:
+    """No node is isolated, yet the path falls apart: the guard does not keep connectivity."""
+    path = plekton.Graph([(i, i + 1) for i in range(_PATH_NODES - 1)], n_nodes=_PATH_NODES)
+    # High scores on (0, 1), (2, 3), …, (38, 39): the threshold keeps 19 of these 20 edges
+    # and the guard gives the 20th back, so every other edge of the path survives.
+    scores = np.array([1.0 if i % 2 == 0 else 0.0 for i in range(path.n_edges)])
+    keep = sparsify.select_mask(path, scores, "threshold", retention_ratio=0.5, guard="isolates")
+    sparse = path.edge_subgraph(keep)
+
+    degrees = np.bincount(sparse.edges.ravel(), minlength=_PATH_NODES)
+    assert (degrees > 0).all(), "a node was left isolated"
+    assert plekton.metrics.components(sparse) == _PATH_PAIRS
+    # The restored edge comes on top of the threshold's budget: 20 edges kept, not 19.
+    unguarded = sparsify.select_mask(path, scores, "threshold", retention_ratio=0.5, guard="none")
+    assert int(unguarded.sum()) == _PATH_PAIRS - 1
+    assert int(keep.sum()) == _PATH_PAIRS
+
+
+def test_an_unknown_guard_is_refused() -> None:
+    """A guard that does not exist is refused, not ignored."""
+    scores = sparsify.similarity_scores(GRAPH, "jaccard")
+    with pytest.raises(ValueError, match=r"unknown guard 'forest' \(expected none, isolates\)"):
+        sparsify.select_mask(GRAPH, scores, "threshold", retention_ratio=0.5, guard="forest")
+
+
+def test_the_old_keyword_is_gone() -> None:
+    """``preserve_connectivity`` named a guarantee the guard never gave; it no longer exists."""
+    scores = sparsify.similarity_scores(GRAPH, "jaccard")
+    with pytest.raises(TypeError, match="preserve_connectivity"):
+        sparsify.select_mask(
+            GRAPH,
+            scores,
+            "threshold",
+            retention_ratio=0.5,
+            preserve_connectivity=True,
+        )
 
 
 def test_approx_effective_resistance_is_finite_and_edge_aligned() -> None:

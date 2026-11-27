@@ -2,7 +2,7 @@
 // Copyright 2026 Ilias Laoukili
 //! Edge samplers and the scaffolding shared by every backbone generator: RNG
 //! construction, DC-SBM degree-correction weights, the block-pair sampling
-//! loop, and effective-homophily — kept in one place so SBM / cSBM / BA stay
+//! loop, and effective homophily — kept in one place so SBM / cSBM / BA stay
 //! focused on their distinct algorithm.
 
 use std::collections::BTreeMap;
@@ -226,21 +226,33 @@ pub fn seeded_rng(seed: Option<u64>) -> ChaCha8Rng {
     seed.map_or_else(SeedableRng::from_entropy, SeedableRng::seed_from_u64)
 }
 
-/// Effective homophily: the fraction of canonical edges whose endpoints share a
-/// community label. Defined as `0.0` for an edgeless graph. No RNG.
-pub fn effective_homophily(edges: &[(i64, i64)], labels: &[usize]) -> f64 {
-    if edges.is_empty() {
-        return 0.0;
-    }
-    let intra = edges
-        .iter()
-        .filter(|&&(src, dst)| {
-            labels[usize::try_from(src).unwrap_or(usize::MAX)]
-                == labels[usize::try_from(dst).unwrap_or(usize::MAX)]
-        })
-        .count();
-    num_traits::ToPrimitive::to_f64(&(intra)).unwrap_or(0.0)
-        / num_traits::ToPrimitive::to_f64(&(edges.len())).unwrap_or(0.0)
+/// Effective homophily of canonical `(i64, i64)` edges: the fraction whose
+/// endpoints share a community label, or `None` for an edgeless graph. No RNG.
+///
+/// The value comes from `plekton-metrics` — the one implementation the metric
+/// API uses too — reached without copying the edges. A negative endpoint, which
+/// no generator produces, is an error rather than a sentinel index.
+///
+/// # Errors
+/// [`SynthGraphError::InvalidParameter`] if an endpoint is negative.
+pub fn edge_homophily(
+    edges: &[(i64, i64)],
+    labels: &[usize],
+) -> Result<Option<f64>, SynthGraphError> {
+    plekton_metrics::homophily::try_homophily_of(
+        edges
+            .iter()
+            .map(|&(src, dst)| -> Result<(usize, usize), (i64, i64)> {
+                match (usize::try_from(src), usize::try_from(dst)) {
+                    (Ok(u), Ok(v)) => Ok((u, v)),
+                    _ => Err((src, dst)),
+                }
+            }),
+        labels,
+    )
+    .map_err(|(src, dst)| {
+        SynthGraphError::InvalidParameter(format!("edge ({src}, {dst}) has a negative endpoint"))
+    })
 }
 
 /// How per-node degree correction θ is obtained.

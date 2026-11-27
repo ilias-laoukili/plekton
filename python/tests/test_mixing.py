@@ -4,8 +4,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 plekton = pytest.importorskip("plekton")
 
@@ -141,3 +146,21 @@ def test_a_drawn_seed_is_recorded_and_reproduces_the_graph() -> None:
     seed = first.metadata["seed"]
     again = plekton.mixing_graph(200, mean_degree=4.0, seed=seed)
     np.testing.assert_array_equal(first.edges, again.edges)
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: plekton.mixing_graph(0, mean_degree=3.0, seed=1),
+        lambda: plekton.mixing_graph(5, degrees=[0] * 5, seed=1),
+    ],
+)
+def test_no_node_to_average_over_gives_no_mean_degree(build: Callable[[], Any]) -> None:
+    """No node can take a tie: the mean degrees are over nothing, so ``None`` with a reason."""
+    graph = build()
+    assert graph.n_edges == 0
+    assert graph.metadata["wanted_degree"] is None
+    assert graph.metadata["mean_degree"] is None
+    reasons = graph.metadata["metrics_skipped"]
+    assert [entry["metric"] for entry in reasons] == ["wanted_degree", "mean_degree"]
+    assert all(entry["reason"].startswith("undefined here: ") for entry in reasons)

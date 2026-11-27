@@ -66,8 +66,10 @@ def mixing_graph(  # noqa: PLR0913 - one keyword argument per field of MixingReq
     with ``directed=True``, one row per arc. ``metadata`` holds the
     ``wanted_degree``, the realised ``mean_degree``, one ``mixing`` report per
     attribute (``target``, ``within``, ``random``, ``r``), the ``clustering``
-    report and the ``seed`` that ran. With ``strength``, the tie strengths are in
-    ``edge_attrs["strength"]``, one per edge.
+    report and the ``seed`` that ran. When no node can take a tie (no node at all,
+    or every wanted degree ``0``), ``wanted_degree`` and ``mean_degree`` are
+    ``None``, with the reason in ``metadata["metrics_skipped"]``. With
+    ``strength``, the tie strengths are in ``edge_attrs["strength"]``, one per edge.
     """
     used = resolve_seed(seed)
     result: dict[str, Any] = mixing_graph_native(
@@ -86,16 +88,19 @@ def mixing_graph(  # noqa: PLR0913 - one keyword argument per field of MixingReq
         seed=used,
     )
     strengths = result.get("strengths")
+    metadata: dict[str, Any] = {
+        "wanted_degree": result["wanted_degree"],
+        "mean_degree": result["mean_degree"],
+        "mixing": result["mixing"],
+        "clustering": result["clustering"],
+        "seed": used,
+    }
+    if "metrics_skipped" in result:
+        metadata["metrics_skipped"] = result["metrics_skipped"]
     return trusted_graph(
         result["edges"],
         nodes,
         directed=bool(result["directed"]),
-        metadata={
-            "wanted_degree": result["wanted_degree"],
-            "mean_degree": result["mean_degree"],
-            "mixing": result["mixing"],
-            "clustering": result["clustering"],
-            "seed": used,
-        },
+        metadata=metadata,
         edge_attrs=None if strengths is None else {"strength": strengths},
     )

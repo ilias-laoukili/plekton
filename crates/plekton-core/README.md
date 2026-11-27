@@ -16,7 +16,10 @@ Zero Python or NumPy dependencies. Python bindings live in [`../plekton-python`]
 use plekton::generate_sbm_core;
 
 let graph = generate_sbm_core(1_000, 4, 0.08, 0.005, Some(2.5), Some(42))?;
-println!("{} nodes, {} edges, h = {:.3}", graph.n_nodes, graph.canonical_edges.len(), graph.effective_h);
+// `effective_h` is `None` for a graph without edges.
+if let Some(h) = graph.effective_h {
+    println!("{} nodes, {} edges, h = {h:.3}", graph.n_nodes, graph.canonical_edges.len());
+}
 ```
 
 See [docs/models.md](../../docs/models.md) and [docs/json-schema.md](../../docs/json-schema.md) for full parameter and JSON contract details.

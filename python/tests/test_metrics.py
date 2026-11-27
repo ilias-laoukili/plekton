@@ -66,6 +66,35 @@ def test_homophily_needs_labels() -> None:
         plekton.metrics.homophily(graph)
 
 
+def test_a_single_community_is_fully_homophilous() -> None:
+    """Every node in community 0 is one community, not "unlabelled": every edge stays inside."""
+    graph = plekton.Graph([[0, 1], [1, 2]], n_nodes=3, labels=[0, 0, 0])
+    assert plekton.metrics.homophily(graph) == 1.0
+    edgeless = plekton.Graph(np.zeros((0, 2), dtype=np.int64), n_nodes=3, labels=[0, 1, 1])
+    assert plekton.metrics.homophily(edgeless) is None
+
+
+@pytest.mark.parametrize("n_nodes", [0, 1])
+def test_density_is_undefined_below_two_nodes(n_nodes: int) -> None:
+    """No pair of nodes, nothing for the edge count to be a fraction of: ``None``, not ``0.0``."""
+    graph = plekton.Graph(np.zeros((0, 2), dtype=np.int64), n_nodes=n_nodes)
+    assert plekton.metrics.density(graph) is None
+
+
+def test_an_edgeless_graph_has_density_zero() -> None:
+    """With two nodes or more, no edge is a real density of 0."""
+    graph = plekton.Graph(np.zeros((0, 2), dtype=np.int64), n_nodes=2)
+    assert plekton.metrics.density(graph) == 0.0
+
+
+def test_clustering_is_undefined_without_nodes() -> None:
+    """A mean over no node is ``None``; nodes without edges each count 0, as documented."""
+    empty = plekton.Graph(np.zeros((0, 2), dtype=np.int64), n_nodes=0)
+    assert plekton.metrics.clustering(empty) is None
+    edgeless = plekton.Graph(np.zeros((0, 2), dtype=np.int64), n_nodes=3)
+    assert plekton.metrics.clustering(edgeless) == 0.0
+
+
 def test_directed_graphs_only_reach_arc_metrics() -> None:
     """Homophily counts arcs; metrics with undirected semantics refuse a directed graph."""
     arcs = plekton.Graph([[0, 1], [1, 0], [1, 2]], n_nodes=3, labels=[0, 0, 1], directed=True)

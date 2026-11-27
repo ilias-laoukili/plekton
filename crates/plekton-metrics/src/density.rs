@@ -12,8 +12,11 @@
 /// ```
 ///
 /// # Edge cases
-/// - Returns `0.0` for graphs with fewer than 2 nodes (no edges possible).
-/// - Returns `1.0` for a complete graph `Kₙ` (`n_edges = n_nodes*(n_nodes-1)/2`).
+/// - Returns `None` for graphs with fewer than 2 nodes: no pair of nodes can be
+///   an edge, so there is nothing for the edge count to be a fraction of. Pair
+///   the `None` with a [`crate::skipped::SkippedMetric`].
+/// - Returns `Some(0.0)` for an edgeless graph of 2 nodes or more, a real answer.
+/// - Returns `Some(1.0)` for a complete graph `Kₙ` (`n_edges = n_nodes*(n_nodes-1)/2`).
 ///
 /// # Arguments
 /// * `n_nodes` – Total number of nodes.
@@ -24,62 +27,61 @@
 /// use plekton_metrics::density::density;
 ///
 /// // Complete graph K4: 6 edges, density = 2*6 / (4*3) = 1.0
-/// assert_eq!(density(4, 6).to_bits(), 1.0_f64.to_bits());
+/// assert_eq!(density(4, 6), Some(1.0));
 ///
 /// // Empty graph: 0 edges → density 0.0
-/// assert_eq!(density(100, 0).to_bits(), 0.0_f64.to_bits());
+/// assert_eq!(density(100, 0), Some(0.0));
 ///
-/// // Single node: density undefined → 0.0
-/// assert_eq!(density(1, 0).to_bits(), 0.0_f64.to_bits());
+/// // Single node: no pair to be an edge → no density
+/// assert_eq!(density(1, 0), None);
 /// ```
 #[must_use]
-pub fn density(n_nodes: usize, n_edges: usize) -> f64 {
+pub const fn density(n_nodes: usize, n_edges: usize) -> Option<f64> {
     if n_nodes < 2 {
-        return 0.0;
+        return None;
     }
     let max_edges = crate::count_to_f64(n_nodes) * (crate::count_to_f64(n_nodes) - 1.0) / 2.0;
-    if max_edges == 0.0 {
-        return 0.0;
-    }
-    crate::count_to_f64(n_edges) / max_edges
+    Some(crate::count_to_f64(n_edges) / max_edges)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn bits(value: Option<f64>) -> Option<u64> {
+        value.map(f64::to_bits)
+    }
+
     #[test]
     fn complete_graph_k4() {
         // K4 has 4*3/2 = 6 edges → density 1.0
-        assert_eq!(density(4, 6).to_bits(), 1.0_f64.to_bits());
+        assert_eq!(bits(density(4, 6)), Some(1.0_f64.to_bits()));
     }
 
     #[test]
     fn empty_graph() {
-        assert_eq!(density(100, 0).to_bits(), 0.0_f64.to_bits());
+        assert_eq!(bits(density(100, 0)), Some(0.0_f64.to_bits()));
     }
 
     #[test]
-    fn single_node() {
-        assert_eq!(density(1, 0).to_bits(), 0.0_f64.to_bits());
+    fn single_node_has_no_density() {
+        assert_eq!(density(1, 0), None);
     }
 
     #[test]
-    fn zero_nodes() {
-        assert_eq!(density(0, 0).to_bits(), 0.0_f64.to_bits());
+    fn zero_nodes_have_no_density() {
+        assert_eq!(density(0, 0), None);
     }
 
     #[test]
     fn sparse_graph() {
         // N=4, E=1 → density = 1/6 ≈ 0.1667
-        let density_value = density(4, 1);
-        assert!((density_value - 1.0 / 6.0).abs() < 1e-12);
+        assert!(density(4, 1).is_some_and(|d| (d - 1.0 / 6.0).abs() < 1e-12));
     }
 
     #[test]
     fn path_graph_10() {
         // Path on 10 nodes: 9 edges, max = 45 → density = 0.2
-        let density_value = density(10, 9);
-        assert!((density_value - 0.2).abs() < 1e-12);
+        assert!(density(10, 9).is_some_and(|d| (d - 0.2).abs() < 1e-12));
     }
 }

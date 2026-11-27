@@ -32,11 +32,15 @@ Generates graphs that satisfy simultaneous homophily, heterophily, or full categ
 
 ## Companion Analysis Primitives
 
-`plekton` pairs these generators with structural evaluation and reduction primitives: degree assortativity and honest structural metrics (`plekton-metrics`) [5], Spielman–Srivastava approximate effective-resistance sparsification (`plekton-sparsify`) [6], the shortest-path-preserving metric backbone (`plekton-sparsify`) [7], and Speaker–Listener Label Propagation (SLPA) for overlapping community detection (`plekton-fit`) [8].
+`plekton` pairs these generators with structural evaluation and reduction primitives: degree assortativity and honest structural metrics (`plekton-metrics`) [5], Spielman–Srivastava approximate effective resistance used as edge scores for selection, without the reweighting that gives their sparsifiers a spectral guarantee (`plekton-sparsify`) [6], the shortest-path-preserving metric backbone (`plekton-sparsify`) [7], and Speaker–Listener Label Propagation (SLPA) for overlapping community detection (`plekton-fit`) [8].
 
 ## Determinism
 
 Every generator (`sbm`, `csbm`, `ba`, `mixing`) and both `plekton-fit` detectors (label propagation, SLPA) draw from a single `rand_chacha::ChaCha8Rng` stream seeded with `seed_from_u64(seed)` and consumed in a fixed order. The same seed therefore gives the same output. The Python API always passes the seed explicitly: `seed=None` draws one in Python, and the generators record it in `graph.metadata["seed"]`, so an unseeded graph can still be regenerated (in Rust, `seed: None` draws OS entropy and is not reproducible). Golden tests pin it exactly — edges, labels and features of SBM, DC-SBM, BA and cSBM in `crates/plekton-core/tests/determinism_golden.rs`, label propagation and SLPA in `crates/plekton-fit/tests/determinism_golden.rs` — and CI runs them on Linux, macOS and Windows. `mixing_graph` is tested for same-seed reproducibility but has no golden.
+
+`plekton-sparsify` seeds the same way but splits the work over two streams of `ChaCha8Rng::seed_from_u64(seed)`: the effective-resistance projection reads stream 0 and weighted sampling (`"sampled"`) reads stream 1, so one seed given to both does not make the sampling re-read the draws that produced its scores.
+
+`plekton.sweep` derives the seed of each graph from its base seed (`base_seed`, or else the `seed` of the base configuration), the graph's own configuration without its seed, and its replica number: the first 8 bytes of the SHA-256 of their canonical JSON. Adding a value to the grid therefore changes no other entry's seed or graph, and the same entry gets the same seed in every process.
 
 ChaCha8 replaced `SmallRng`, which rand does not promise to be reproducible across platforms or library versions. The goldens do not cover:
 

@@ -13,7 +13,7 @@ use plekton::{
 use pyo3::{
     exceptions::PyValueError,
     prelude::*,
-    types::{PyDict, PyModule},
+    types::{PyDict, PyList, PyModule},
     Bound,
 };
 
@@ -180,6 +180,17 @@ fn mixing_graph_native<'py>(
     clustering_dict.set_item("target", result.clustering.target)?;
     clustering_dict.set_item("transitivity", result.clustering.transitivity)?;
     out.set_item("clustering", clustering_dict)?;
+
+    if !result.metrics_skipped.is_empty() {
+        let skipped = PyList::empty(py);
+        for entry in &result.metrics_skipped {
+            let item = PyDict::new(py);
+            item.set_item("metric", &entry.metric)?;
+            item.set_item("reason", &entry.reason)?;
+            skipped.append(item)?;
+        }
+        out.set_item("metrics_skipped", skipped)?;
+    }
 
     Ok(out)
 }

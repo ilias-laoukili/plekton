@@ -18,7 +18,7 @@ Guide for coding agents and contributors working in the `plekton` repository.
 crates/
   plekton-metrics   (leaf crate — structural metrics & edge similarities over `&[(usize, usize)]`)
   plekton-fit       (leaf crate — DC-SBM estimation & SLPA overlapping communities; `rand` only)
-  plekton-sparsify  (depends on: plekton-metrics — spectral approx-ER, metric backbone, selection)
+  plekton-sparsify  (depends on: plekton-metrics — approx-ER scores, metric backbone, selection)
   plekton-entity    (depends on: plekton-metrics — generic CSV/JSONL → heterogeneous entity graph)
   plekton-core      (lib `plekton`, depends on: plekton-metrics — SBM, O(E) DC-SBM, cSBM, BA, mixing_graph)
   plekton-python    (cdylib `_plekton`, depends on core/fit/metrics/sparsify — PyO3 abi3-py311)
@@ -67,6 +67,7 @@ mypy
    - Core generators (`sbm`, `csbm`, `ba`, `mixing`) and the `plekton-fit` detectors (label propagation, SLPA) must stay deterministic for a given `seed`.
    - Seeded randomness uses `rand_chacha::ChaCha8Rng` only (`plekton-core`'s `sampling::seeded_rng`, or `ChaCha8Rng::seed_from_u64`). Never `SmallRng`, `StdRng` or `thread_rng`: rand does not promise them to be reproducible across platforms or versions.
    - `crates/plekton-core/tests/determinism_golden.rs` pins exact edges, labels, and features; `crates/plekton-fit/tests/determinism_golden.rs` pins label propagation and SLPA. Never alter RNG consumption order or sampling loops accidentally; intentional algorithmic revisions must explicitly re-freeze golden constants and document why.
+   - `plekton-sparsify` pins its two seeded outputs in unit tests: `approx_er::tests::scores_are_unchanged_by_the_sampling_stream` (approximate effective-resistance scores, bit for bit) and `ops::sampled::tests::selection_golden` (a `Strategy::Sampled` selection). The projection reads stream 0 of `ChaCha8Rng::seed_from_u64(seed)` and the sampling stream 1, so one seed given to both never shares draws. Same rule as above: never change these values accidentally; re-freeze them only deliberately, saying why.
    - Not covered by the goldens: 32-bit targets (rand 0.8 samples `usize` ranges at pointer width) and minor-version upgrades of `rand` / `rand_distr`, which may change values and then require a deliberate re-freeze.
 6. **Honest metrics & pre-allocation budgets**:
    - Undefined or threshold-skipped metrics return `Option::None` (paired with `SkippedMetric`), never a fabricated `0.0`.
