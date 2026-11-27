@@ -40,6 +40,8 @@ Every generator (`sbm`, `csbm`, `ba`, `mixing`) and both `plekton-fit` detectors
 
 `plekton-sparsify` seeds the same way but splits the work over two streams of `ChaCha8Rng::seed_from_u64(seed)`: the effective-resistance projection reads stream 0 and weighted sampling (`"sampled"`) reads stream 1, so one seed given to both does not make the sampling re-read the draws that produced its scores.
 
+`plekton.sweep` derives the seed of each graph from its base seed (`base_seed`, or else the `seed` of the base configuration), the graph's own configuration without its seed, and its replica number: the first 8 bytes of the SHA-256 of their canonical JSON. Adding a value to the grid therefore changes no other entry's seed or graph, and the same entry gets the same seed in every process.
+
 ChaCha8 replaced `SmallRng`, which rand does not promise to be reproducible across platforms or library versions. The goldens do not cover:
 
 - **32-bit targets.** Several draws sample a `usize` range, which rand 0.8 does at the platform's pointer width.
