@@ -9,11 +9,12 @@ use super::indices_by_score_desc;
 ///
 /// Phase 1 guarantees every node with degree `≥ 1` keeps at least
 /// `min(min_per_node, degree)` of its highest-scoring incident edges — so no
-/// originally-connected node is isolated. Phase 2 tops the selection up to
+/// node that had an edge is left without one. Phase 2 tops the selection up to
 /// `num_keep` from the global descending ranking. If the guarantee phase alone
 /// already meets or exceeds `num_keep`, all guaranteed edges are kept (the
-/// result may then hold slightly more than `num_keep` edges — preserving
-/// connectivity is preferred over isolating nodes).
+/// result may then hold slightly more than `num_keep` edges — leaving no node
+/// isolated takes precedence over the budget). Like [`crate::Guard::Isolates`],
+/// this does not keep the graph connected.
 pub fn select(
     n_nodes: usize,
     edges: &[(usize, usize)],

@@ -29,7 +29,7 @@
 //! ## Quick start
 //!
 //! ```
-//! use plekton_sparsify::{sparsify_with_metric, Metric, Strategy};
+//! use plekton_sparsify::{sparsify_with_metric, Guard, Metric, Strategy};
 //!
 //! // A triangle plus one weak bridge edge (3)-(0).
 //! let edges = [(0, 1), (0, 2), (1, 2), (0, 3)];
@@ -45,11 +45,11 @@
 //!     Metric::Jaccard,
 //!     strategy,
 //!     /* ignore_self_loops = */ true,
-//!     /* preserve_connectivity = */ true,
+//!     Guard::Isolates,
 //! )
 //! .expect("valid inputs");
 //!
-//! // Node 3 keeps its only edge thanks to the connectivity guarantee.
+//! // Node 3 keeps its only edge: the guard gives it back.
 //! assert!(result.kept_edges.contains(&(0, 3)));
 //! ```
 
@@ -65,7 +65,7 @@ mod ops;
 
 pub use approx_er::{approx_er_scores, ApproxErConfig};
 pub use backbone::{metric_backbone, proximity_to_distance};
-pub use strategy::{Metric, Strategy};
+pub use strategy::{Guard, Metric, Strategy};
 
 /// The outcome of a sparsification call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,13 +162,14 @@ pub fn score_edges(
     Ok(scores)
 }
 
-/// Select a subset of edges under the given [`Strategy`] and pre-computed scores.
+/// Select a subset of edges under the given [`Strategy`] and pre-computed
+/// scores, then apply `guard`.
 ///
-/// `scores` must be aligned with `edges` (one score per edge). When
-/// `preserve_connectivity` is `true`, every node that had at least one edge in
-/// the input keeps at least one edge in the output (its highest-scoring incident
-/// edge is restored if selection would have isolated it) — required for GNNs
-/// that divide by node degree.
+/// `scores` must be aligned with `edges` (one score per edge). With
+/// [`Guard::Isolates`], every node that had at least one edge in the input keeps
+/// at least one edge in the output (its highest-scoring incident edge is
+/// restored if the selection dropped them all) — required for GNNs that divide
+/// by node degree. The guard does not keep the graph connected; see [`Guard`].
 ///
 /// # Errors
 /// - [`SparsifyError::InvalidRatio`] if the strategy's `retention_ratio` is not
@@ -179,7 +180,7 @@ pub fn sparsify(
     edges: &[(usize, usize)],
     scores: &[f64],
     strategy: &Strategy,
-    preserve_connectivity: bool,
+    guard: Guard,
 ) -> Result<SparsifyResult, SparsifyError> {
     let retention_ratio = strategy.retention_ratio();
     if retention_ratio <= 0.0 || retention_ratio > 1.0 {
@@ -204,8 +205,9 @@ pub fn sparsify(
         Strategy::Sampled { seed, .. } => ops::sampled::select(scores, num_keep, seed),
     };
 
-    if preserve_connectivity {
-        restore_connectivity(n_nodes, edges, scores, &mut mask);
+    match guard {
+        Guard::Off => {}
+        Guard::Isolates => restore_isolates(n_nodes, edges, scores, &mut mask),
     }
 
     let kept_edges = edges
@@ -231,10 +233,10 @@ pub fn sparsify_with_metric(
     metric: Metric,
     strategy: Strategy,
     ignore_self_loops: bool,
-    preserve_connectivity: bool,
+    guard: Guard,
 ) -> Result<SparsifyResult, SparsifyError> {
     let scores = score_edges(metric, n_nodes, edges, features, ignore_self_loops)?;
-    sparsify(n_nodes, edges, &scores, &strategy, preserve_connectivity)
+    sparsify(n_nodes, edges, &scores, &strategy, guard)
 }
 
 /// Spectral sparsification (Spielman-Srivastava): score edges by approximate
@@ -254,14 +256,14 @@ pub fn sparsify_spectral(
     edges: &[(usize, usize)],
     retention_ratio: f64,
     config: &ApproxErConfig,
-    preserve_connectivity: bool,
+    guard: Guard,
 ) -> Result<SparsifyResult, SparsifyError> {
     let scores = approx_er_scores(n_nodes, edges, config)?;
     let strategy = Strategy::Sampled {
         retention_ratio,
         seed: config.seed,
     };
-    sparsify(n_nodes, edges, &scores, &strategy, preserve_connectivity)
+    sparsify(n_nodes, edges, &scores, &strategy, guard)
 }
 
 /// Metric-backbone sparsification driven by a [`plekton_metrics::similarity`]
@@ -287,18 +289,14 @@ pub fn sparsify_metric_backbone(
     metric_backbone(n_nodes, edges, &distances, epsilon)
 }
 
-/// Restore one incident edge for every node that the selection would isolate.
+/// [`Guard::Isolates`]: restore one incident edge for every node that the
+/// selection would isolate.
 ///
 /// A node that had `≥ 1` edge in the input but `0` in the current mask has its
 /// highest-scoring incident edge re-added. Adding an edge covers both of its
 /// endpoints, so nodes are processed once and the running kept-degree is
 /// updated as edges are restored.
-fn restore_connectivity(
-    n_nodes: usize,
-    edges: &[(usize, usize)],
-    scores: &[f64],
-    mask: &mut [bool],
-) {
+fn restore_isolates(n_nodes: usize, edges: &[(usize, usize)], scores: &[f64], mask: &mut [bool]) {
     let mut had_edge = vec![false; n_nodes];
     let mut kept_degree = vec![0usize; n_nodes];
     let mut best_incident: Vec<Option<(f64, usize)>> = vec![None; n_nodes];
@@ -358,8 +356,8 @@ mod tests {
             retention_ratio: 0.75,
             keep_lowest: false,
         };
-        // Without the connectivity guarantee, the 3 triangle edges are kept.
-        let result = sparsify(4, &EDGES, &scores, &strategy, false).unwrap();
+        // Without the guard, the 3 triangle edges are kept.
+        let result = sparsify(4, &EDGES, &scores, &strategy, Guard::Off).unwrap();
         assert_eq!(result.kept_edges, vec![(0, 1), (0, 2), (1, 2)]);
     }
 
@@ -372,7 +370,7 @@ mod tests {
                 keep_lowest: false,
             };
             assert_eq!(
-                sparsify(4, &EDGES, &scores, &strategy, false),
+                sparsify(4, &EDGES, &scores, &strategy, Guard::Off),
                 Err(SparsifyError::InvalidRatio(bad)),
             );
         }
@@ -384,7 +382,7 @@ mod tests {
             retention_ratio: 0.5,
             keep_lowest: false,
         };
-        let err = sparsify(4, &EDGES, &[0.0, 0.0], &strategy, false).unwrap_err();
+        let err = sparsify(4, &EDGES, &[0.0, 0.0], &strategy, Guard::Off).unwrap_err();
         assert_eq!(
             err,
             SparsifyError::LengthMismatch {
@@ -395,18 +393,18 @@ mod tests {
     }
 
     #[test]
-    fn preserve_connectivity_saves_the_pendant_node() {
+    fn isolates_guard_saves_the_pendant_node() {
         // Aggressive threshold would drop the low-Jaccard bridge (0,3), isolating
-        // node 3. The connectivity guarantee must restore it.
+        // node 3. The isolates guard must restore it.
         let scores = jaccard(&EDGES, 4);
         let strategy = Strategy::Threshold {
             retention_ratio: 0.5, // keep 2 edges
             keep_lowest: false,
         };
-        let without = sparsify(4, &EDGES, &scores, &strategy, false).unwrap();
+        let without = sparsify(4, &EDGES, &scores, &strategy, Guard::Off).unwrap();
         assert!(!without.kept_edges.contains(&(0, 3)));
 
-        let with = sparsify(4, &EDGES, &scores, &strategy, true).unwrap();
+        let with = sparsify(4, &EDGES, &scores, &strategy, Guard::Isolates).unwrap();
         assert!(with.kept_edges.contains(&(0, 3)));
         // Every node ends with at least one incident edge.
         let mut degree = [0usize; 4];
@@ -418,13 +416,50 @@ mod tests {
     }
 
     #[test]
+    fn isolates_guard_does_not_keep_a_path_connected() {
+        // A 40-node path whose scores alternate high and low: the threshold keeps
+        // 19 of the 20 high edges (0,1), (2,3), …, (38,39) — ties go to the later
+        // edges, so (0,1) is the one left out — and the guard gives (0,1) back to
+        // the two nodes it would have stranded. No node is isolated, yet the path
+        // falls into 20 disjoint pairs: the guard is not a connectivity guarantee.
+        let path: Vec<(usize, usize)> = (0..39).map(|i| (i, i + 1)).collect();
+        let scores: Vec<f64> = (0..39)
+            .map(|i| if i % 2 == 0 { 1.0 } else { 0.0 })
+            .collect();
+        let strategy = Strategy::Threshold {
+            retention_ratio: 0.5, // ⌊39 · 0.5⌋ = 19 edges
+            keep_lowest: false,
+        };
+        let result = sparsify(40, &path, &scores, &strategy, Guard::Isolates).unwrap();
+
+        let mut degree = [0usize; 40];
+        for &(u, v) in &result.kept_edges {
+            degree[u] += 1;
+            degree[v] += 1;
+        }
+        assert!(degree.iter().all(|&d| d >= 1), "a node was left isolated");
+        assert_eq!(
+            plekton_metrics::components::count_components(40, &result.kept_edges),
+            20
+        );
+        // The restored edge comes on top of the 19 the threshold aimed for.
+        assert_eq!(result.kept_edges.len(), 20);
+
+        // Without the guard, nodes 0 and 1 lose their only edges.
+        let unguarded = sparsify(40, &path, &scores, &strategy, Guard::Off).unwrap();
+        assert_eq!(unguarded.kept_edges.len(), 19);
+        assert!(!unguarded.kept_edges.contains(&(0, 1)));
+        assert!(unguarded.kept_edges.iter().all(|&(u, v)| u > 1 && v > 1));
+    }
+
+    #[test]
     fn degree_aware_guarantees_min_edge_per_node() {
         let scores = jaccard(&EDGES, 4);
         let strategy = Strategy::DegreeAware {
             retention_ratio: 0.25, // budget of 1, but every node must keep one
             min_per_node: 1,
         };
-        let result = sparsify(4, &EDGES, &scores, &strategy, false).unwrap();
+        let result = sparsify(4, &EDGES, &scores, &strategy, Guard::Off).unwrap();
         let mut degree = [0usize; 4];
         for &(u, v) in &result.kept_edges {
             degree[u] += 1;
@@ -440,8 +475,8 @@ mod tests {
             retention_ratio: 0.5,
             seed: 7,
         };
-        let a = sparsify(4, &EDGES, &scores, &strategy, false).unwrap();
-        let b = sparsify(4, &EDGES, &scores, &strategy, false).unwrap();
+        let a = sparsify(4, &EDGES, &scores, &strategy, Guard::Off).unwrap();
+        let b = sparsify(4, &EDGES, &scores, &strategy, Guard::Off).unwrap();
         assert_eq!(a, b);
     }
 
@@ -452,7 +487,7 @@ mod tests {
             retention_ratio: 1.0,
             keep_lowest: false,
         };
-        let result = sparsify(4, &EDGES, &scores, &strategy, false).unwrap();
+        let result = sparsify(4, &EDGES, &scores, &strategy, Guard::Off).unwrap();
         assert_eq!(result.kept_edges, EDGES.to_vec());
     }
 

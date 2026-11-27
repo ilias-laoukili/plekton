@@ -5,7 +5,7 @@
 //! Each operator takes per-edge `scores` (and, for [`degree_aware`], the graph
 //! structure) plus a target `num_keep`, and returns a boolean keep-mask aligned
 //! with the edge list. The [`crate::sparsify`] façade drives them and applies
-//! the optional connectivity guarantee afterwards.
+//! the chosen [`crate::Guard`] afterwards.
 
 pub mod degree_aware;
 pub mod sampled;

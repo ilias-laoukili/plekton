@@ -231,9 +231,9 @@ class sparsify:  # noqa: N801 - mirrors PyO3 submodule name
         keep_lowest: bool,
         min_per_node: int,
         seed: int,
-        preserve_connectivity: bool,
+        guard: str,
     ) -> NDArray[np.bool_]:
-        """Select edges under ``threshold``, ``degree_aware``, or ``sampled`` strategy."""
+        """Select edges under ``threshold``, ``degree_aware``, or ``sampled``; guard ``none`` or ``isolates``."""
 
     @staticmethod
     def metric_backbone_mask(

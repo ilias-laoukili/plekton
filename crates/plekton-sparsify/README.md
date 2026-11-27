@@ -4,4 +4,4 @@ Principled edge-sparsification strategies for undirected graphs in pure Rust (pa
 
 - **Spectral sparsification (`approx_er`, `sparsify_spectral`)** — approximate effective resistance via Spielman–Srivastava Johnson–Lindenstrauss projection and a dependency-free conjugate-gradient Laplacian solver.
 - **Metric backbone (`backbone`, `sparsify_metric_backbone`)** — keeps only shortest-path-preserving edges.
-- **Score-driven selection (`Strategy::Threshold`, `Strategy::DegreeAware`, `Strategy::Sampled`)** — paired with `plekton-metrics` similarity scores (`Jaccard`, `AdamicAdar`, `DegreeProduct`, `FeatureCosine`) and optional `preserve_connectivity` so no non-isolated node is left stranded for GNN message passing.
+- **Score-driven selection (`Strategy::Threshold`, `Strategy::DegreeAware`, `Strategy::Sampled`)** — paired with `plekton-metrics` similarity scores (`Jaccard`, `AdamicAdar`, `DegreeProduct`, `FeatureCosine`) and a `Guard`: `Guard::Isolates` gives every node that had an edge its highest-scoring one back, so no node is left stranded for GNN message passing. It does not keep the graph connected.

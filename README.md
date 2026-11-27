@@ -80,7 +80,7 @@ python benchmarks/bench.py --quick
 
 - **Spectral** — Spielman–Srivastava approximate effective resistance: Johnson–Lindenstrauss projection and a dependency-free conjugate-gradient Laplacian solver, parallelised with Rayon.
 - **Metric backbone** — keeps only shortest-path-preserving edges; the retained fraction follows from the graph, not from a ratio.
-- **Score-based selection** — threshold, degree-aware (per-node minimum) or weighted sampling over Jaccard, Adamic–Adar, degree-product or feature-cosine scores, with a connectivity guard (on by default) so that no originally connected node is left isolated.
+- **Score-based selection** — threshold, degree-aware (per-node minimum) or weighted sampling over Jaccard, Adamic–Adar, degree-product or feature-cosine scores. A guard (`guard="isolates"`, the default) gives every node that had an edge its highest-scoring one back, so the selection leaves no node isolated; it does not keep the graph connected.
 
 ### Machine-learning utilities
 

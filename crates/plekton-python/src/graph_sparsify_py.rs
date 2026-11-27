@@ -11,7 +11,7 @@ use ndarray::Array1;
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
 use plekton_sparsify::{
     approx_er_scores, metric_backbone as backbone_select, proximity_to_distance, score_edges,
-    sparsify, ApproxErConfig, Metric, SparsifyError, Strategy,
+    sparsify, ApproxErConfig, Guard, Metric, SparsifyError, Strategy,
 };
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyModule, Bound};
 
@@ -110,7 +110,7 @@ fn approx_effective_resistance<'py>(
 #[pyfunction]
 #[pyo3(signature = (
     edges, n_nodes, scores, strategy, retention_ratio,
-    keep_lowest, min_per_node, seed, preserve_connectivity
+    keep_lowest, min_per_node, seed, guard
 ))]
 #[allow(
     clippy::too_many_arguments,
@@ -126,7 +126,7 @@ fn select_mask<'py>(
     keep_lowest: bool,
     min_per_node: usize,
     seed: u64,
-    preserve_connectivity: bool,
+    guard: &str,
 ) -> PyResult<Bound<'py, PyArray1<bool>>> {
     let edge_pairs = read_edges(&edges, n_nodes)?;
     let score_slice = scores
@@ -152,17 +152,18 @@ fn select_mask<'py>(
             )));
         }
     };
+    let guard = match guard {
+        "none" => Guard::Off,
+        "isolates" => Guard::Isolates,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown guard '{other}' (expected none, isolates)"
+            )));
+        }
+    };
 
     let result = py
-        .allow_threads(|| {
-            sparsify(
-                n_nodes,
-                &edge_pairs,
-                score_slice,
-                &selection,
-                preserve_connectivity,
-            )
-        })
+        .allow_threads(|| sparsify(n_nodes, &edge_pairs, score_slice, &selection, guard))
         .map_err(|e| map_err(&e))?;
 
     Ok(Array1::from(result.kept_mask).into_pyarray(py))
