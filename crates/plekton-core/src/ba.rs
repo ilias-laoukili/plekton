@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use rand::Rng;
 
 use crate::{
-    sampling::{effective_homophily, seeded_rng},
+    sampling::{edge_homophily, seeded_rng},
     types::SbmCoreResult,
     SynthGraphError,
 };
@@ -140,7 +140,7 @@ pub fn generate_ba_core(
         .map(|node_idx| node_idx * n_communities / n_nodes)
         .collect();
 
-    let effective_h = effective_homophily(&edges, &labels);
+    let effective_h = edge_homophily(&edges, &labels)?;
 
     Ok(SbmCoreResult {
         canonical_edges: edges,

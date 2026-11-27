@@ -489,15 +489,52 @@ class TestNetworkxToJsonMetadata:
 
     def test_unlabelled_homophily_is_null_with_a_reason(self) -> None:
         """Unlabelled homophily is null, with a reason."""
-        # Every node defaults to community 0: there is no label for an edge to share.
+        # No node carries a community attribute: each is written in community 0 only
+        # because the field is required, so there is no label for an edge to share.
         metadata = _metadata_of(nx.path_graph(3))
         assert metadata["homophily"] is None
         assert metadata["metrics_skipped"] == [
             {
                 "metric": "homophily",
-                "reason": "undefined here: no node is labelled (every community is 0)",
+                "reason": "undefined here: no node carries a community attribute",
             },
         ]
+
+    def test_a_single_community_is_measured(self) -> None:
+        """Every node labelled 0 is one community, not an unlabelled graph: homophily 1.0."""
+        graph = nx.path_graph(3)
+        nx.set_node_attributes(graph, 0, "community")
+        metadata = _metadata_of(graph)
+        assert metadata["homophily"] == 1.0
+        assert "metrics_skipped" not in metadata
+
+    def test_a_partly_labelled_graph_has_no_homophily(self) -> None:
+        """Nodes without a community would be measured in a stand-in community 0: refused."""
+        graph = nx.path_graph(3)
+        nx.set_node_attributes(graph, {0: 1}, "community")
+        metadata = _metadata_of(graph)
+        assert metadata["homophily"] is None
+        assert metadata["metrics_skipped"] == [
+            {
+                "metric": "homophily",
+                "reason": "undefined here: 2 of 3 nodes carry no community attribute",
+            },
+        ]
+
+    def test_a_graph_without_nodes_has_no_mean_degree(self) -> None:
+        """No node: ``avg_degree_actual`` is absent with the reason the Rust writer gives."""
+        metadata = _metadata_of(nx.Graph())
+        assert "avg_degree_actual" not in metadata
+        rust = json.loads(
+            plekton.to_json(
+                plekton.Graph(np.zeros((0, 2), dtype=np.int64), n_nodes=0, labels=[]),
+            ),
+        )["metadata"]
+        assert "avg_degree_actual" not in rust
+        for metric in ("homophily", "avg_degree_actual"):
+            ours = [entry for entry in metadata["metrics_skipped"] if entry["metric"] == metric]
+            theirs = [entry for entry in rust["metrics_skipped"] if entry["metric"] == metric]
+            assert ours == theirs, metric
 
     def test_edgeless_homophily_is_null_with_a_reason(self) -> None:
         """Edgeless homophily is null, with a reason."""

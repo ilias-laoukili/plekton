@@ -32,16 +32,25 @@ pub struct Metadata {
     /// community label. Differs from the *requested* homophily because of
     /// rounding when block sizes are unequal.
     ///
-    /// Always serialised; `None` (JSON `null`) when the fraction is undefined —
-    /// no edges, or no node labelled — with a `metrics_skipped` entry saying
-    /// which.
+    /// Always serialised; `None` (JSON `null`) when it is undefined — the graph
+    /// has no edges, or carries no labels at all (every node then written in
+    /// community `0`) — with a `metrics_skipped` entry saying which. A single
+    /// community is a labelling, and gives `1.0`.
     pub homophily: Option<f64>,
     /// Mean degree across all nodes (`2 · n_edges / n_nodes`).
-    #[serde(default)]
-    pub avg_degree_actual: f64,
-    /// Number of connected components reachable through the canonical edges.
-    #[serde(default)]
-    pub n_components: usize,
+    ///
+    /// `None`, and not serialised, for a graph with no node, with a
+    /// `metrics_skipped` entry. A document without the field reads as `None`
+    /// rather than a made-up `0.0`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avg_degree_actual: Option<f64>,
+    /// Number of connected components reachable through the canonical edges
+    /// (`0` for a graph with no node).
+    ///
+    /// Always written by this crate. A document without the field reads as
+    /// `None` rather than a made-up `0`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_components: Option<usize>,
     /// **Deprecated — read [`Self::transitivity_global`] instead.**
     ///
     /// Legacy alias kept for compatibility with earlier graph-JSON readers;
@@ -67,8 +76,10 @@ pub struct Metadata {
     /// Why any metric above is `None`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub metrics_skipped: Vec<SkippedMetric>,
-    /// Graph density: `2 · n_edges / (n_nodes · (n_nodes - 1))`. Always present
-    /// for non-empty `n_nodes`; serialised only when non-`None`.
+    /// Graph density: `2 · n_edges / (n_nodes · (n_nodes - 1))`.
+    ///
+    /// `None`, and not serialised, below two nodes, where no pair of nodes can
+    /// be an edge, with a `metrics_skipped` entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub density: Option<f64>,
     /// Degree assortativity (Newman's r). `None` for edgeless graphs where the
@@ -122,8 +133,9 @@ pub struct SbmCoreResult {
     pub canonical_edges: Vec<(i64, i64)>,
     /// Community labels indexed by node id.
     pub labels: Vec<usize>,
-    /// Effective homophily (see [`Metadata::homophily`]).
-    pub effective_h: f64,
+    /// Effective homophily (see [`Metadata::homophily`]); `None` when the graph
+    /// has no edge.
+    pub effective_h: Option<f64>,
     /// Number of nodes in the result; mirrors `labels.len()`.
     pub n_nodes: usize,
 }
@@ -139,8 +151,9 @@ pub struct CsbmCoreResult {
     /// is the feature vector for `node_idx`. Flat layout avoids one `Vec<Vec<f32>>`
     /// allocation per node and matches `PyG`'s `x` tensor layout.
     pub x_flat: Vec<f32>,
-    /// Effective homophily (see [`Metadata::homophily`]).
-    pub effective_h: f64,
+    /// Effective homophily (see [`Metadata::homophily`]); `None` when the graph
+    /// has no edge.
+    pub effective_h: Option<f64>,
     /// Number of nodes; mirrors `labels.len()`.
     pub n_nodes: usize,
     /// Feature dimension; `x_flat.len() == n_nodes · feat_dim`.

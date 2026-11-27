@@ -45,7 +45,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use num_traits::ToPrimitive;
-use plekton_metrics::{mixing::attribute_mixing, transitivity::transitivity};
+use plekton_metrics::{
+    mixing::attribute_mixing, skipped::SkippedMetric, transitivity::transitivity,
+};
 use rand::{distributions::WeightedIndex, seq::SliceRandom, Rng};
 use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, LogNormal, Normal};
@@ -176,14 +178,21 @@ pub struct MixingGraph {
     /// Strength of every tie, in the order of `edges`, when asked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strengths: Option<Vec<f64>>,
-    /// Mean wanted degree of the nodes that can take ties (out-degree when directed).
-    pub wanted_degree: f64,
-    /// Mean degree reached by the same nodes.
-    pub mean_degree: f64,
+    /// Mean wanted degree of the nodes that can take ties (out-degree when
+    /// directed); `None` when no node can take one — no node at all, or every
+    /// wanted degree 0 — so the mean would be over nothing.
+    pub wanted_degree: Option<f64>,
+    /// Mean degree reached by the same nodes; `None` exactly when
+    /// [`Self::wanted_degree`] is.
+    pub mean_degree: Option<f64>,
     /// Mixing of every attribute given, targeted or not.
     pub mixing: BTreeMap<String, AttributeReport>,
     /// Clustering, target and measured.
     pub clustering: ClusteringReport,
+    /// Why [`Self::wanted_degree`] and [`Self::mean_degree`] are `None`, when
+    /// they are.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub metrics_skipped: Vec<SkippedMetric>,
 }
 
 /// Generates a graph from a [`MixingRequest`].
@@ -250,12 +259,19 @@ pub fn generate_mixing_graph(request: &MixingRequest) -> Result<MixingGraph, Syn
             degree[b] += 1;
         }
     }
+    // A mean over the nodes that can take ties: none when there are none.
     let mean = |xs: &[usize]| {
-        if reaching.is_empty() {
-            0.0
-        } else {
-            to_f64(reaching.iter().map(|&u| xs[u]).sum()) / to_f64(reaching.len())
-        }
+        (!reaching.is_empty())
+            .then(|| to_f64(reaching.iter().map(|&u| xs[u]).sum()) / to_f64(reaching.len()))
+    };
+    let metrics_skipped = if reaching.is_empty() {
+        let because = "no node can take a tie, so there is no node to average over";
+        vec![
+            SkippedMetric::undefined("wanted_degree", because),
+            SkippedMetric::undefined("mean_degree", because),
+        ]
+    } else {
+        Vec::new()
     };
 
     let mut mixing = BTreeMap::new();
@@ -289,6 +305,7 @@ pub fn generate_mixing_graph(request: &MixingRequest) -> Result<MixingGraph, Syn
         strengths,
         mixing,
         clustering,
+        metrics_skipped,
     })
 }
 
@@ -1313,7 +1330,44 @@ mod tests {
             graph.mixing["sex"].within < graph.mixing["sex"].random,
             "heterophilous on sex"
         );
-        assert!((graph.mean_degree - graph.wanted_degree).abs() < 0.5);
+        let (mean, wanted) = (
+            graph.mean_degree.ok_or("mean_degree")?,
+            graph.wanted_degree.ok_or("wanted_degree")?,
+        );
+        assert!((mean - wanted).abs() < 0.5);
+        assert_eq!(graph.metrics_skipped, [] as [SkippedMetric; 0]);
+        Ok(())
+    }
+
+    #[test]
+    fn no_node_to_average_over_means_no_mean_degree() -> Result {
+        // No node at all, then nodes that all want no tie (a degree drawn around
+        // `mean_degree` is at least 1, so that takes explicit zero degrees): the
+        // mean degrees are over nothing, so they are absent with their reason,
+        // never a made-up 0.
+        for request in [
+            MixingRequest {
+                nodes: 0,
+                mean_degree: Some(3.0),
+                ..MixingRequest::default()
+            },
+            MixingRequest {
+                nodes: 5,
+                degrees: Some(vec![0; 5]),
+                ..MixingRequest::default()
+            },
+        ] {
+            let graph = generate_mixing_graph(&request)?;
+            assert_eq!(graph.edges, [] as [(usize, usize); 0]);
+            assert_eq!(graph.wanted_degree, None);
+            assert_eq!(graph.mean_degree, None);
+            let skipped: Vec<&str> = graph
+                .metrics_skipped
+                .iter()
+                .map(|skipped| skipped.metric.as_str())
+                .collect();
+            assert_eq!(skipped, ["wanted_degree", "mean_degree"]);
+        }
         Ok(())
     }
 

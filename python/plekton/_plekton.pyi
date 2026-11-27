@@ -22,10 +22,10 @@ def generate_sbm(
     p_out: float,
     theta_exponent: float | None,
     seed: int,
-) -> tuple[NDArray[np.int64], NDArray[np.int64], float]:
+) -> tuple[NDArray[np.int64], NDArray[np.int64], float | None]:
     """Generate an SBM or exact O(N + E) DC-SBM graph.
 
-    Returns ``(edges [E, 2], labels [N], effective_h)``.
+    Returns ``(edges [E, 2], labels [N], effective_h)``; ``effective_h`` is ``None`` without edges.
     """
 
 def generate_sbm_from_fit(
@@ -34,10 +34,10 @@ def generate_sbm_from_fit(
     b_matrix: NDArray[np.float64],
     theta: NDArray[np.float64] | None,
     seed: int,
-) -> tuple[NDArray[np.int64], NDArray[np.int64], float]:
+) -> tuple[NDArray[np.int64], NDArray[np.int64], float | None]:
     """Generate a graph from an arbitrary fitted blockmodel ``(block_sizes, b_matrix, theta)``.
 
-    Returns ``(edges [E, 2], labels [N], effective_h)``.
+    Returns ``(edges [E, 2], labels [N], effective_h)``; ``effective_h`` is ``None`` without edges.
     """
 
 def generate_ba(
@@ -46,10 +46,10 @@ def generate_ba(
     m0: int | None,
     n_communities: int,
     seed: int,
-) -> tuple[NDArray[np.int64], NDArray[np.int64], float]:
+) -> tuple[NDArray[np.int64], NDArray[np.int64], float | None]:
     """Generate a Barabási–Albert preferential-attachment graph.
 
-    Returns ``(edges [E, 2], labels [N], effective_h)``.
+    Returns ``(edges [E, 2], labels [N], effective_h)``; ``effective_h`` is ``None`` without edges.
     """
 
 def generate_csbm(
@@ -71,21 +71,25 @@ def generate_csbm(
     centroids: Sequence[float] | None,
     covariance: Sequence[float] | None,
     seed: int,
-) -> tuple[NDArray[np.int64], NDArray[np.float32], NDArray[np.int64], float]:
+) -> tuple[NDArray[np.int64], NDArray[np.float32], NDArray[np.int64], float | None]:
     """Generate a contextual SBM graph with correlated node features.
 
-    Returns ``(edges [E, 2], x [N, F], labels [N], effective_h)``.
+    Returns ``(edges [E, 2], x [N, F], labels [N], effective_h)``; ``effective_h`` is ``None`` without edges.
     """
 
 # ─── JSON serialization & config dispatch ────────────────────────────────────
 
 def graph_to_json(
     edge_index: NDArray[np.int64],
-    labels: NDArray[np.int64],
+    n_nodes: int,
+    labels: NDArray[np.int64] | None = None,
     x: NDArray[np.float32] | None = None,
     path: str | None = None,
 ) -> str:
-    """Serialise ``(edge_index [2, M], labels, optional x)`` to canonical ``plekton.graph/v1`` JSON."""
+    """Serialise ``(edge_index [2, M], n_nodes, optional labels, optional x)`` to canonical ``plekton.graph/v1`` JSON.
+
+    Without labels every node is written in community ``0`` and the homophily is ``null``.
+    """
 
 def json_to_graph(
     json_str: str,
@@ -176,8 +180,8 @@ class metrics:  # noqa: N801 - mirrors PyO3 submodule name
         """Count connected components."""
 
     @staticmethod
-    def density(n_nodes: int, n_edges: int) -> float:
-        """Undirected graph density: ``2E / (N * (N - 1))``."""
+    def density(n_nodes: int, n_edges: int) -> float | None:
+        """Undirected graph density ``2E / (N * (N - 1))``, or ``None`` below two nodes."""
 
     @staticmethod
     def attribute_mixing(

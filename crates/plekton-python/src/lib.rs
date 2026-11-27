@@ -47,15 +47,20 @@ fn to_i64(value: usize) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
-/// `(edges [E, 2], labels [N], effective_h)`.
-type SbmArrays<'py> = (Bound<'py, PyArray2<i64>>, Bound<'py, PyArray1<i64>>, f64);
+/// `(edges [E, 2], labels [N], effective_h)`; `effective_h` is `None` without edges.
+type SbmArrays<'py> = (
+    Bound<'py, PyArray2<i64>>,
+    Bound<'py, PyArray1<i64>>,
+    Option<f64>,
+);
 
-/// `(edges [E, 2], x [N, F], labels [N], effective_h)`.
+/// `(edges [E, 2], x [N, F], labels [N], effective_h)`; `effective_h` is `None`
+/// without edges.
 type CsbmArrays<'py> = (
     Bound<'py, PyArray2<i64>>,
     Bound<'py, PyArray2<f32>>,
     Bound<'py, PyArray1<i64>>,
-    f64,
+    Option<f64>,
 );
 
 /// `(edges [E, 2], labels [N], optional x [N, F], metadata as JSON)`.
@@ -96,7 +101,7 @@ fn labels_array(labels: Vec<usize>) -> Array1<i64> {
 struct SbmOwned {
     edges: Array2<i64>,
     labels: Array1<i64>,
-    effective_h: f64,
+    effective_h: Option<f64>,
 }
 
 impl SbmOwned {
@@ -296,14 +301,18 @@ fn generate_csbm<'py>(
 
 // ─── JSON output ─────────────────────────────────────────────────────────────
 
-/// Serialises `(edge_index [2, M], labels [N], optional x [N, F])` to canonical
-/// `plekton.graph/v1` JSON, optionally writing the document to `path`.
+/// Serialises `(edge_index [2, M], n_nodes, optional labels [N], optional x [N, F])`
+/// to canonical `plekton.graph/v1` JSON, optionally writing the document to `path`.
+///
+/// Without labels every node is written in community `0`, and the homophily is
+/// `null` with its reason: there is no labelling to measure.
 #[pyfunction]
-#[pyo3(signature = (edge_index, labels, x=None, path=None))]
+#[pyo3(signature = (edge_index, n_nodes, labels=None, x=None, path=None))]
 fn graph_to_json<'py>(
     py: Python<'py>,
     edge_index: PyReadonlyArray2<'py, i64>,
-    labels: PyReadonlyArray1<'py, i64>,
+    n_nodes: usize,
+    labels: Option<PyReadonlyArray1<'py, i64>>,
     x: Option<PyReadonlyArray2<'py, f32>>,
     path: Option<&str>,
 ) -> PyResult<String> {
@@ -321,26 +330,31 @@ fn graph_to_json<'py>(
         raw_edges.push((ei_view[[0, col]], ei_view[[1, col]]));
     }
 
-    let labels_view = labels.as_array();
-    let mut labels_usize: Vec<usize> = Vec::with_capacity(labels_view.len());
-    for &lbl in labels_view {
-        let Ok(community) = usize::try_from(lbl) else {
-            return Err(PyValueError::new_err(format!(
-                "community label {lbl} must be non-negative"
-            )));
-        };
-        labels_usize.push(community);
-    }
+    let labels_usize: Option<Vec<usize>> = match labels {
+        Some(ref labels) => {
+            let labels_view = labels.as_array();
+            let mut converted: Vec<usize> = Vec::with_capacity(labels_view.len());
+            for &lbl in labels_view {
+                let Ok(community) = usize::try_from(lbl) else {
+                    return Err(PyValueError::new_err(format!(
+                        "community label {lbl} must be non-negative"
+                    )));
+                };
+                converted.push(community);
+            }
+            Some(converted)
+        }
+        None => None,
+    };
 
     let x_owned: Option<(Vec<f32>, usize)> = match x {
         Some(ref arr) => {
             let x_view = arr.as_array();
             let feat_dim = x_view.ncols();
-            if x_view.nrows() != labels_usize.len() {
+            if x_view.nrows() != n_nodes {
                 return Err(PyValueError::new_err(format!(
-                    "x has {} rows but labels has length {}",
-                    x_view.nrows(),
-                    labels_usize.len()
+                    "x has {} rows but n_nodes={n_nodes}",
+                    x_view.nrows()
                 )));
             }
             let flat: Vec<f32> = x_view.iter().copied().collect();
@@ -369,7 +383,8 @@ fn graph_to_json<'py>(
         let x_ref = x_owned
             .as_ref()
             .map(|(flat, feat_dim)| (flat.as_slice(), *feat_dim));
-        let graph = arrays_to_graph_output(&canonical_edges, &labels_usize, x_ref)?;
+        let graph =
+            arrays_to_graph_output(n_nodes, &canonical_edges, labels_usize.as_deref(), x_ref)?;
         let json = serde_json::to_string_pretty(&graph).map_err(SynthGraphError::Serialization)?;
         if let Some(out_path) = path_owned {
             fs::write(out_path, &json).map_err(SynthGraphError::Io)?;

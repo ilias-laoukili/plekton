@@ -112,10 +112,12 @@ fn effective_h_in_unit_interval() -> Result<(), Box<dyn std::error::Error>> {
         seed: Some(42),
         ..CsbmConfig::default()
     })?;
+    let effective_h = result
+        .effective_h
+        .ok_or("a graph with edges has a homophily")?;
     assert!(
-        result.effective_h >= 0.0 && result.effective_h <= 1.0,
-        "effective_h={} not in [0,1]",
-        result.effective_h
+        (0.0..=1.0).contains(&effective_h),
+        "effective_h={effective_h} not in [0,1]"
     );
     Ok(())
 }
@@ -125,17 +127,64 @@ fn fully_intra_graph_has_effective_h_one() -> Result<(), Box<dyn std::error::Err
     // p_out=0 → all edges are intra-block → effective_h must be 1.0
     let result = generate_sbm_core(20, 4, 0.5, 0.0, None, Some(5))?;
     if !result.canonical_edges.is_empty() {
-        assert_eq!(result.effective_h.to_bits(), 1.0_f64.to_bits());
+        assert_eq!(
+            result.effective_h.map(f64::to_bits),
+            Some(1.0_f64.to_bits())
+        );
     }
     Ok(())
 }
 
 #[test]
-fn empty_edge_graph_has_effective_h_zero() -> Result<(), Box<dyn std::error::Error>> {
-    // p_in=p_out=0 → no edges → effective_h defined as 0.0
+fn an_edgeless_graph_has_no_homophily() -> Result<(), Box<dyn std::error::Error>> {
+    // p_in=p_out=0 → no edges → no fraction to measure: None, never a made-up 0.0,
+    // and the JSON says why.
     let result = generate_sbm_core(10, 2, 0.0, 0.0, None, Some(0))?;
     assert_eq!(result.canonical_edges, [] as [(i64, i64); 0]);
-    assert_eq!(result.effective_h.to_bits(), 0.0_f64.to_bits());
+    assert_eq!(result.effective_h, None);
+
+    let graph = sbm_result_to_graph_output(&result);
+    assert_eq!(graph.metadata.homophily, None);
+    let reasons: Vec<(&str, &str)> = graph
+        .metadata
+        .metrics_skipped
+        .iter()
+        .map(|skipped| (skipped.metric.as_str(), skipped.reason.as_str()))
+        .collect();
+    assert!(
+        reasons.contains(&("homophily", "undefined here: the graph has no edges")),
+        "{reasons:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_single_community_has_homophily_one_everywhere() -> Result<(), Box<dyn std::error::Error>> {
+    // One block: every edge is intra-community. The generator, its JSON and the
+    // metric API agree on 1.0 — the metric no longer reads "all labels 0" as
+    // "unlabelled".
+    let result = generate_sbm_core(20, 1, 0.3, 0.0, None, Some(3))?;
+    assert_ne!(result.canonical_edges, [] as [(i64, i64); 0]);
+    assert_eq!(
+        result.effective_h.map(f64::to_bits),
+        Some(1.0_f64.to_bits())
+    );
+
+    let graph = sbm_result_to_graph_output(&result);
+    assert_eq!(
+        graph.metadata.homophily.map(f64::to_bits),
+        Some(1.0_f64.to_bits())
+    );
+
+    let edges: Vec<(usize, usize)> = result
+        .canonical_edges
+        .iter()
+        .map(|&(u, v)| Ok((usize::try_from(u)?, usize::try_from(v)?)))
+        .collect::<Result<_, std::num::TryFromIntError>>()?;
+    assert_eq!(
+        plekton_metrics::homophily::compute_homophily(&edges, &result.labels).map(f64::to_bits),
+        Some(1.0_f64.to_bits())
+    );
     Ok(())
 }
 
@@ -514,7 +563,7 @@ fn ba_m1_grows_a_spanning_tree() -> Result<(), Box<dyn std::error::Error>> {
             "seed {seed}: isolated node, degrees {degree:?}"
         );
         let graph = plekton::sbm_result_to_graph_output(&result);
-        assert_eq!(graph.metadata.n_components, 1, "seed {seed}");
+        assert_eq!(graph.metadata.n_components, Some(1), "seed {seed}");
     }
     Ok(())
 }
@@ -711,10 +760,10 @@ fn dcsbm_dyadic_large_scale_is_canonical_unique_and_on_target(
         (avg_deg - 10.0).abs() < 1.5,
         "DC-SBM avg_degree={avg_deg:.2} drifted far from 10.0"
     );
+    let effective_h = r.effective_h.ok_or("a graph with edges has a homophily")?;
     assert!(
-        (r.effective_h - 0.8).abs() < 0.05,
-        "DC-SBM homophily={:.3} drifted far from 0.8",
-        r.effective_h
+        (effective_h - 0.8).abs() < 0.05,
+        "DC-SBM homophily={effective_h:.3} drifted far from 0.8"
     );
     Ok(())
 }

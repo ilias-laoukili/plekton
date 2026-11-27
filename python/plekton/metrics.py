@@ -44,9 +44,12 @@ def homophily(
     labels: npt.ArrayLike | None = None,
     n_nodes: int | None = None,
 ) -> float | None:
-    """Edge homophily (fraction of intra-community edges), or ``None`` if undefined.
+    """Edge homophily (fraction of intra-community edges), or ``None`` without edges.
 
-    ``labels`` defaults to ``graph.labels``. Directed graphs count arcs.
+    Defined for any labelling, a single community included (every edge then stays
+    inside it: ``1.0``). ``labels`` defaults to ``graph.labels``; a graph without
+    labels raises ``ValueError``, since there is nothing to measure. Directed graphs
+    count arcs.
     """
     g = as_graph(graph, n_nodes, caller="metrics.homophily", allow_directed=True)
     val: float | None = _ext.homophily(g.edges, node_labels(g, labels, caller="metrics.homophily"))
@@ -70,7 +73,10 @@ def attribute_mixing(
 
 
 def clustering(graph: Graph | npt.ArrayLike, *, n_nodes: int | None = None) -> float | None:
-    """Mean local clustering coefficient, or ``None`` above the size threshold."""
+    """Mean local clustering coefficient, or ``None`` above the size threshold or without nodes.
+
+    A node of degree below 2 counts ``0.0``, so a graph with nodes but no edges gives ``0.0``.
+    """
     g = as_graph(graph, n_nodes, caller="metrics.clustering")
     val: float | None = _ext.clustering(g.n_nodes, g.edges)
     return val
@@ -96,10 +102,14 @@ def components(graph: Graph | npt.ArrayLike, *, n_nodes: int | None = None) -> i
     return int(_ext.components(g.n_nodes, g.edges))
 
 
-def density(graph: Graph | npt.ArrayLike, *, n_nodes: int | None = None) -> float:
-    """Undirected graph density: ``2E / (N * (N - 1))``."""
+def density(graph: Graph | npt.ArrayLike, *, n_nodes: int | None = None) -> float | None:
+    """Undirected graph density ``2E / (N * (N - 1))``, or ``None`` below two nodes.
+
+    With fewer than two nodes no pair can be an edge, so there is no fraction to report.
+    """
     g = as_graph(graph, n_nodes, caller="metrics.density")
-    return float(_ext.density(g.n_nodes, g.n_edges))
+    val: float | None = _ext.density(g.n_nodes, g.n_edges)
+    return val
 
 
 def degree_summary(

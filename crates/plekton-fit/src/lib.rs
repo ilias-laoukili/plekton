@@ -201,10 +201,15 @@ impl Fit {
     }
 }
 
-/// Lossless `usize` -> `f64` for counts, avoiding a precision-losing cast.
+/// `usize` count -> `f64`, exact for every count below 2^53 (it used to go
+/// through `u32` and saturate at `u32::MAX`).
 #[inline]
-fn count_to_f64(count: usize) -> f64 {
-    f64::from(u32::try_from(count).unwrap_or(u32::MAX))
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "exact below 2^53, which no node or edge count gets near"
+)]
+const fn count_to_f64(count: usize) -> f64 {
+    count as f64
 }
 
 /// Reduces an edge list to sorted, deduplicated, self-loop-free undirected pairs.

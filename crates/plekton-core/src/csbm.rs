@@ -9,9 +9,7 @@ use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, Exp, Normal, Uniform};
 
 use crate::{
-    sampling::{
-        compute_dc_theta, effective_homophily, sample_all_blocks, seeded_rng, DegreeCorrection,
-    },
+    sampling::{compute_dc_theta, edge_homophily, sample_all_blocks, seeded_rng, DegreeCorrection},
     types::CsbmCoreResult,
     SynthGraphError,
 };
@@ -810,7 +808,7 @@ pub fn generate_csbm(config: &CsbmConfig<'_>) -> Result<CsbmCoreResult, SynthGra
         compute_block_sizes(config.n_nodes, config.n_communities, config.class_weights)?;
     let mut rng = seeded_rng(config.seed);
     let (edges, labels) = sample_csbm_edges(config, &block_sizes, &mut rng)?;
-    let effective_h = effective_homophily(&edges, &labels);
+    let effective_h = edge_homophily(&edges, &labels)?;
     let x_flat = generate_node_features(config, &dist_enum, &labels, &mut rng)?;
 
     Ok(CsbmCoreResult {
