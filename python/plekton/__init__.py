@@ -14,7 +14,8 @@ plus optional labels, features, per-edge attributes and metadata. It exposes:
   ``generate_from_config`` and ``generate_mixing_graph_json``.
 - Blockmodel estimation & community detection: ``plekton.fit``.
 - Structural graph metrics: ``plekton.metrics``.
-- Edge scoring & spectral/backbone sparsification: ``plekton.sparsify``.
+- Edge scoring (similarities, approximate effective resistance) and score-based or
+  metric-backbone sparsification: ``plekton.sparsify``.
 - Leakage-free group & temporal ML splitters: ``plekton.splits``.
 
 Every randomised function takes ``seed=None`` by default, which draws a seed; the

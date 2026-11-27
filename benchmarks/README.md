@@ -1,6 +1,6 @@
 # Benchmarks
 
-A single self-contained script benchmarks the release wheel across SBM, exact $O(N + E)$ DC-SBM, cSBM, Barabási–Albert, multi-attribute `mixing_graph`, and spectral effective-resistance sparsification (with optional NetworkX comparison when installed).
+A single self-contained script benchmarks the release wheel across SBM, exact $O(N + E)$ DC-SBM, cSBM, Barabási–Albert, multi-attribute `mixing_graph`, and approximate effective-resistance scoring (with optional NetworkX comparison when installed).
 
 Each `(task, engine, n_nodes)` runs in its **own fresh Python subprocess** so that peak resident memory (`ru_maxrss`, reported in MiB) belongs solely to that engine and task, alongside full host hardware and package metadata.
 

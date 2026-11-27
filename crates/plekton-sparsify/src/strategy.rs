@@ -35,13 +35,18 @@ pub enum Strategy {
         min_per_node: usize,
     },
 
-    /// Weighted sampling **without replacement**, with selection probability
-    /// proportional to edge score (Efraimidis-Spirakis keys).
+    /// Weighted sampling **without replacement** (Efraimidis-Spirakis keys): like
+    /// successive draws that each pick a remaining edge with probability
+    /// proportional to its score. An edge's chance of being kept grows with its
+    /// score but is not proportional to it; it saturates towards 1 for heavy
+    /// edges.
     ///
     /// Unlike [`Strategy::Threshold`], every edge has a non-zero chance of being
     /// kept, so low-scoring bridge edges are not guaranteed to be cut. The
-    /// `seed` drives a `ChaCha8Rng`, so the same seed reproduces the same
-    /// selection (not promised across minor versions of `rand`).
+    /// `seed` drives stream 1 of `ChaCha8Rng::seed_from_u64(seed)` — not stream
+    /// 0, which the effective-resistance projection reads — so the same seed
+    /// reproduces the same selection (not promised across minor versions of
+    /// `rand`).
     Sampled {
         /// Target fraction of edges to keep, in `(0, 1]`.
         retention_ratio: f64,

@@ -78,7 +78,7 @@ python benchmarks/bench.py --quick
 
 ### Sparsification
 
-- **Spectral** — Spielman–Srivastava approximate effective resistance: Johnson–Lindenstrauss projection and a dependency-free conjugate-gradient Laplacian solver, parallelised with Rayon.
+- **Effective resistance** — Spielman–Srivastava approximate effective resistance: Johnson–Lindenstrauss projection and a dependency-free conjugate-gradient Laplacian solver, parallelised with Rayon. Use it as edge scores for threshold or sampled selection; the kept edges are not reweighted, so the result carries no spectral guarantee.
 - **Metric backbone** — keeps only shortest-path-preserving edges; the retained fraction follows from the graph, not from a ratio.
 - **Score-based selection** — threshold, degree-aware (per-node minimum) or weighted sampling over Jaccard, Adamic–Adar, degree-product or feature-cosine scores. A guard (`guard="isolates"`, the default) gives every node that had an edge its highest-scoring one back, so the selection leaves no node isolated; it does not keep the graph connected.
 
@@ -193,7 +193,7 @@ Like every graph function, `plekton.fit.overlapping_communities` takes a `plekto
 | `crates/plekton-core` (`plekton`) | Pure-Rust generation engine: SBM, O(N + E) DC-SBM, cSBM, BA, `mixing_graph`, JSON output |
 | `crates/plekton-metrics` | Structural metrics and edge similarities over plain `&[(usize, usize)]` edge lists |
 | `crates/plekton-fit` | Method-of-moments DC-SBM estimator, seeded label propagation, SLPA overlapping communities |
-| `crates/plekton-sparsify` | Spectral approx-ER (Spielman–Srivastava), metric backbone, threshold, degree-aware and sampled selection |
+| `crates/plekton-sparsify` | Approximate effective resistance (Spielman–Srivastava), metric backbone, threshold, degree-aware and sampled selection |
 | `crates/plekton-entity` | Generic CSV/JSONL → heterogeneous entity/relation graphs, temporal joins, tumbling windows, DOT and PyG export |
 | `crates/plekton-python` | PyO3 (`abi3-py311`) zero-copy NumPy bindings (`plekton._plekton`) |
 | `python/plekton` | Python package (`mixing`, `fit`, `metrics`, `sparsify`, `splits`, `distributions`, `presets`, `sweep`; optional `pyg`, `hetero`, `nx`) |

@@ -21,8 +21,10 @@
 //! Two further methods have their own modules because they compute their own
 //! edge scores rather than taking a [`Strategy`] over supplied scores:
 //!
-//! - [`approx_er`] — approximate effective resistance, combined with sampling
-//!   via [`sparsify_spectral`].
+//! - [`approx_er`] — approximate effective resistance (the Johnson–Lindenstrauss
+//!   estimate of Spielman and Srivastava), combined with weighted sampling via
+//!   [`sparsify_resistance_sampled`]. The sampled edges are not reweighted, so
+//!   the result carries no spectral guarantee.
 //! - [`backbone`] — the shortest-path-preserving metric backbone, via
 //!   [`sparsify_metric_backbone`].
 //!
@@ -239,19 +241,26 @@ pub fn sparsify_with_metric(
     sparsify(n_nodes, edges, &scores, &strategy, guard)
 }
 
-/// Spectral sparsification (Spielman-Srivastava): score edges by approximate
-/// effective resistance, then sample proportionally to that resistance.
+/// Keep a `retention_ratio` share of the edges, sampled by approximate
+/// effective resistance.
 ///
-/// [`approx_er_scores`] feeds a [`Strategy::Sampled`] at the given
-/// `retention_ratio`, so critical
-/// (high-resistance) edges are kept with high probability. The `config.seed`
-/// drives the effective-resistance projection; the same seed is reused for the
-/// sampling stream so the whole pipeline is reproducible.
+/// [`approx_er_scores`] scores the edges, then [`Strategy::Sampled`] keeps
+/// `⌊retention_ratio · E⌋` of them by weighted sampling without replacement, so
+/// high-resistance (bridge-like) edges are likely to stay.
+///
+/// This is **not** spectral sparsification. Spielman and Srivastava draw `q`
+/// edges independently with replacement, edge `e` with probability `p_e`
+/// proportional to `w_e · R_e`, and give each draw the weight `w_e / (q · p_e)`;
+/// that reweighting is what preserves the Laplacian quadratic form. Here the
+/// kept edges keep their unit weight, so no spectral bound applies.
+///
+/// `config.seed` drives both steps without sharing draws: the projection reads
+/// stream 0 of `ChaCha8Rng::seed_from_u64(seed)` and the sampling stream 1.
 ///
 /// # Errors
 /// Propagates errors from [`approx_er_scores`] (e.g. an invalid `epsilon`) and
 /// from [`sparsify`] (e.g. an out-of-range `retention_ratio`).
-pub fn sparsify_spectral(
+pub fn sparsify_resistance_sampled(
     n_nodes: usize,
     edges: &[(usize, usize)],
     retention_ratio: f64,

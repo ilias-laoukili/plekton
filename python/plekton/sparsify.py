@@ -112,6 +112,14 @@ def select_mask(  # noqa: PLR0913 - the graph, the score, and the selection poli
     (threshold), ``min_per_node`` (degree_aware), ``seed`` (sampled; ``None``
     draws one).
 
+    ``"sampled"`` draws edges without replacement, favouring high scores: an
+    edge's chance of being kept grows with its score but is not proportional to
+    it. The kept edges are not reweighted, so sampling by
+    :func:`approx_effective_resistance` carries no spectral guarantee. Sampling
+    reads its own random stream, so the seed given to
+    :func:`approx_effective_resistance` can be reused here without reusing its
+    draws.
+
     ``guard`` repairs the selection afterwards. With ``"isolates"`` (the default),
     every node that had an edge gets its highest-scoring one back if the selection
     dropped them all, so no node is left isolated; ``"none"`` keeps the selection

@@ -4,8 +4,7 @@
 //!
 //! Effective resistance `R_eff(u, v)` measures the "electrical distance" between
 //! two nodes: bridge / bottleneck edges have **high** resistance, redundant
-//! edges (many alternative paths) have **low** resistance. Its `O(m log n)` cost
-//! scales well on dense graphs and star-like hubs.
+//! edges (many alternative paths) have **low** resistance.
 //!
 //! ## Method
 //!
@@ -25,12 +24,26 @@
 //! Laplacian positive-definite so CG converges on connected and disconnected
 //! graphs alike.
 //!
+//! ## Cost
+//!
+//! `k = round(24·ln n / ε²)` projected columns (at least 1, capped by
+//! `max_dim`), each solved by at most `max_cg_iters` iterations of
+//! unpreconditioned conjugate gradient costing `O(n + m)` apiece:
+//! `O(k · max_cg_iters · (n + m))` time in the worst case, and `2·n·k` `f64` of
+//! memory for the projection and the solutions. The near-linear running time of
+//! Spielman and Srivastava relies on a near-linear-time Laplacian solver, which
+//! this crate does not have.
+//!
 //! ## Determinism
 //!
 //! The Gaussian draws use a seeded [`ChaCha8Rng`] in edge order, so results are
-//! reproducible across platforms for a given seed. As with any sampling method,
-//! another seed (or another implementation of the method) gives different
-//! scores, each approximating the same `R_eff` within the JL error bound.
+//! reproducible across platforms for a given seed. They come from stream 0, the
+//! default, of `ChaCha8Rng::seed_from_u64(seed)`; weighted sampling
+//! ([`crate::Strategy::Sampled`]) reads stream 1 of the same construction, so
+//! one seed given to both never makes the sampling re-read these draws. As with
+//! any sampling method, another seed (or another implementation of the method)
+//! gives different scores, each approximating the same `R_eff` within the JL
+//! error bound.
 
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -380,6 +393,55 @@ mod tests {
         let a = approx_er_scores(4, &edges, &config).unwrap();
         let b = approx_er_scores(4, &edges, &config).unwrap();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn scores_are_unchanged_by_the_sampling_stream() {
+        // Frozen bit for bit on main (bc3b398) before sampling moved to its own
+        // stream: the projection still reads stream 0, so the scores did not move.
+        let edges = [(0, 1), (0, 2), (1, 2), (2, 3), (3, 4), (3, 5), (4, 5)];
+        let cases: [(u64, usize, [u64; 7]); 2] = [
+            (
+                1,
+                8,
+                [
+                    0x3fd6_3827_4340_8f80,
+                    0x3ff2_f229_daf0_d433,
+                    0x3ff6_1392_a26b_c9cc,
+                    0x3ff9_0f54_40a9_6b24,
+                    0x3fed_5b1f_fa64_ede3,
+                    0x3ff4_3f4f_f6fb_6a6f,
+                    0x3fe4_15e0_2d96_6a8b,
+                ],
+            ),
+            (
+                7,
+                4,
+                [
+                    0x3fed_2871_d891_9076,
+                    0x3fd5_e05b_1481_5df6,
+                    0x3fec_3773_684f_a955,
+                    0x3fa4_4840_55ce_7711,
+                    0x3fd3_4756_a151_71e5,
+                    0x3fe0_3bab_1c22_bd4c,
+                    0x3fd4_2bbb_74a3_5914,
+                ],
+            ),
+        ];
+        for (seed, max_dim, want) in cases {
+            let config = ApproxErConfig {
+                epsilon: 0.3,
+                seed,
+                max_dim: Some(max_dim),
+                ..ApproxErConfig::default()
+            };
+            let got: Vec<u64> = approx_er_scores(6, &edges, &config)
+                .unwrap()
+                .iter()
+                .map(|score| score.to_bits())
+                .collect();
+            assert_eq!(got, want, "seed {seed}, max_dim {max_dim}");
+        }
     }
 
     #[test]
